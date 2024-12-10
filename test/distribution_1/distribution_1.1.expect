@@ -5,6 +5,7 @@
   This test model demonstrates the distribution network modeling features.
   </description>
 	<current>2015-01-01T00:00:00</current>
+	<fcst_current>2015-01-01T00:00:00</fcst_current>
 	<locations>
 		<location>
 			<name>Central WH</name>
@@ -302,11 +303,17 @@
 	</demands>
 	<operationplans>
 		<operationplan>
-			<id>2</id>
+			<reference>4</reference>
 			<operation xsi:type="operation_itemdistribution">
 				<name>Ship In transit product from Source</name>
 				<origin>
 					<name>In transit product @ Source</name>
+					<item>
+						<name>In transit product</name>
+					</item>
+					<location>
+						<name>Source</name>
+					</location>
 				</origin>
 			</operation>
 			<start>2015-06-07T00:00:00</start>
@@ -326,14 +333,26 @@
 			</origin>
 		</operationplan>
 		<operationplan>
-			<id>3</id>
+			<reference>2</reference>
 			<operation xsi:type="operation_itemdistribution">
 				<name>Ship In transit product from Source to Destination</name>
 				<origin>
 					<name>In transit product @ Source</name>
+					<item>
+						<name>In transit product</name>
+					</item>
+					<location>
+						<name>Source</name>
+					</location>
 				</origin>
 				<destination>
 					<name>In transit product @ Destination</name>
+					<item>
+						<name>In transit product</name>
+					</item>
+					<location>
+						<name>Destination</name>
+					</location>
 				</destination>
 			</operation>
 			<start>2015-06-05T00:00:00</start>
@@ -353,11 +372,17 @@
 			</origin>
 		</operationplan>
 		<operationplan>
-			<id>4</id>
+			<reference>3</reference>
 			<operation xsi:type="operation_itemdistribution">
 				<name>Ship In transit product to Destination</name>
 				<destination>
 					<name>In transit product @ Destination</name>
+					<item>
+						<name>In transit product</name>
+					</item>
+					<location>
+						<name>Destination</name>
+					</location>
 				</destination>
 			</operation>
 			<start>2015-06-06T00:00:00</start>
@@ -373,14 +398,26 @@
 			</location>
 		</operationplan>
 		<operationplan>
-			<id>5</id>
+			<reference>1</reference>
 			<operation xsi:type="operation_itemdistribution">
 				<name>Ship product A from Central WH to Local DC 2b</name>
 				<origin>
 					<name>product A @ Central WH</name>
+					<item>
+						<name>product A</name>
+					</item>
+					<location>
+						<name>Central WH</name>
+					</location>
 				</origin>
 				<destination>
 					<name>product A @ Local DC 2b</name>
+					<item>
+						<name>product A</name>
+					</item>
+					<location>
+						<name>Local DC 2b</name>
+					</location>
 				</destination>
 			</operation>
 			<start>2015-06-06T00:00:00</start>

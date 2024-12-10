@@ -7,12 +7,11 @@ This part of the manual covers all topics related to installation and deployment
 .. toctree::
    :maxdepth: 2
 
-   windows-installer
-   windows-apache
+   hardware-requirements
    linux-binaries
+   advanced-configuration
    upgrading
-   windows-compiling
-   linux-compiling
-   other-platforms
+   docker-container
    multi-model
-   python-module
+   backup
+   setting-disk-space-quotas

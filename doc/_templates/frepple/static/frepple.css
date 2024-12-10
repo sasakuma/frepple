@@ -1,5 +1,44 @@
-
 @import url("basic.css");
+
+th>p:first-child,
+td>p:first-child {
+  margin-top: 10px;
+}
+
+th>p:last-child,
+td>p:last-child {
+  margin-bottom: 10px;
+}
+
+.body table {
+  width: 100%;
+}
+
+div.body {
+  margin-bottom: 20px;
+}
+
+div.sphinxrow {
+  display: flex;
+  gap: 1em;
+}
+
+div.sphinxcolumn {
+  flex: 50%;
+  padding-bottom: 0.5em;
+  padding-top: 0.5em;
+}
+
+div.sphinxsidebar ul li.toctree-l1.current {
+  display: list-item;
+}
+
+div.sphinxsidebar ul .toctree-l1.current,
+div.sphinxsidebar ul .toctree-l2.current,
+div.sphinxsidebar ul .toctree-l3.current,
+div.sphinxsidebar ul .toctree-l4.current {
+  font-weight: bold;
+}
 
 @font-face {
   font-family: 'Open Sans';
@@ -57,7 +96,8 @@
   src: url(OpenSans-BoldItalic.ttf) format('truetype');
 }
 
-body, tt {
+body,
+tt {
   font-family: 'Open Sans', sans-serif;
 }
 
@@ -71,20 +111,25 @@ a {
   outline: none;
 }
 
-.documentwrapper {
-  max-width: 750px;
-  float: left;
+.document {
+  display: flex;
 }
 
-#banner, .document {
+div.body {
   max-width: 995px;
-  margin: 0px auto;
 }
 
 #site-title {
   font-size: small;
   float: left;
-  padding: 5px 0px 10px 5px;
+  padding: 5px 25px 10px 25px;
+}
+
+#site-name {
+  float: right;
+  font-weight: bold;
+  line-height: 40px;
+  padding: 5px 25px 10px 25px;
 }
 
 #primary-menu {
@@ -110,7 +155,10 @@ a {
   display: block;
 }
 
-#primary-menu li a, #primary-menu li a:visited, #site-title a, #site-title a:visited {
+#primary-menu li a,
+#primary-menu li a:visited,
+#site-title a,
+#site-title a:visited {
   color: #333;
   text-decoration: none;
 }
@@ -126,13 +174,34 @@ a {
 }
 
 div.sphinxsidebar {
-  float: left;
-  padding-right: 15px;
   height: 100%;
-  margin: 0;
+  margin: 0 25px 0 25px;
   text-align: left;
+  min-width: 220px;
 }
 
+@media (min-width: 1250px) {
+
+  #banner,
+  .document {
+    margin: 0px auto;
+    max-width: 1250px;
+  }
+}
+
+@media (max-width: 1249px) {
+
+  #banner,
+  .document {
+    max-width: 995px;
+    margin-right: 25px;
+    min-width: 300px;
+  }
+
+  .bodywrapper .body {
+    min-width: 300px;
+  }
+}
 
 div.sphinxsidebar ul {
   padding-left: 1.5em;
@@ -153,13 +222,13 @@ div.sphinxsidebar ul ul ul {
 }
 
 .document img {
-  //max-width: 100%;
   padding: 5px;
   margin: 5px;
   border: 1px solid #86989B;
 }
 
-div.admonition, div.warning {
+div.admonition,
+div.warning {
   font-size: 0.9em;
   margin: 1em 0 1em 0;
   border: 1px solid #86989B;
@@ -167,16 +236,19 @@ div.admonition, div.warning {
   padding: 0;
 }
 
-div.admonition p, div.warning p {
+div.admonition p,
+div.warning p {
   margin: 0.5em 1em 0.5em 1em;
   padding: 0;
 }
 
-div.admonition pre, div.warning pre {
+div.admonition pre,
+div.warning pre {
   margin: 0.4em 1em 0.4em 1em;
 }
 
-div.admonition p.admonition-title, div.warning p.admonition-title {
+div.admonition p.admonition-title,
+div.warning p.admonition-title {
   margin: 0;
   padding: 0.1em 0 0.1em 0.5em;
   color: white;
@@ -185,18 +257,19 @@ div.admonition p.admonition-title, div.warning p.admonition-title {
   background-color: #AFC1C4;
 }
 
-div.warning  {
+div.warning {
   border: 1px solid #940000;
 }
 
-div.warning p.admonition-title
-{
+div.warning p.admonition-title {
   background-color: #CF0000;
   border-bottom-color: #940000;
 }
 
-div.admonition ul, div.admonition ol, div.warning ul, div.warning ol
-{
+div.admonition ul,
+div.admonition ol,
+div.warning ul,
+div.warning ol {
   margin: 0.1em 0.5em 0.5em 3em;
   padding: 0;
 }
@@ -215,23 +288,6 @@ pre a {
   text-decoration: underline;
 }
 
-.breadcrumbs {
-  list-style: none;
-  padding-left: 0;
-  margin: 0;
-}
-
-.breadcrumbs li {
-  color: #333;
-  font-size: small;
-  list-style: none;
-  display: block;
-  padding: 0;
-  margin: 0;
-  position: relative;
-  float: left;
-}
-
 #search {
   padding: 2px;
   border: 1px solid #888;
@@ -243,7 +299,77 @@ div.sphinxsidebar .toctree-l1 {
   padding-top: 5px;
 }
 
-div.sphinxsidebar .toctree-l2, div.sphinxsidebar  .toctree-l3, div.sphinxsidebar  .toctree-l4 {
+div.sphinxsidebar .toctree-l2,
+div.sphinxsidebar .toctree-l3,
+div.sphinxsidebar .toctree-l4 {
   font-weight: normal;
   padding-top: 5px;
+}
+
+a.download.internal code {
+  font-family: inherit;
+  font-weight: normal;
+}
+
+code.samp span.pre {
+  width: 1.2em;
+  height: 1.2em;
+  border-radius: .6em;
+  color: #fff;
+  text-align: center;
+  background: #337ab7;
+  display: inline-block;
+}
+
+/* Sphinx tabs: See https: //sphinx-tabs.readthedocs.io/en/latest/ */
+
+.sphinx-tabs {
+  margin-bottom: 1rem;
+}
+
+[role="tablist"] {
+  border-bottom: 1px solid #252525;
+}
+
+.sphinx-tabs-tab {
+  position: relative;
+  color: #252525;
+  line-height: 24px;
+  margin: 0;
+  font-size: 80%;
+  background-color: rgba(255, 255, 255, 0);
+  border-radius: 5px 5px 0 0;
+  border: 0;
+  padding: 5px 15px 5px 15px;
+  margin-bottom: 0;
+}
+
+.sphinx-tabs-tab[aria-selected="true"] {
+  border: 1px solid #252525;
+  border-bottom: 1px solid white;
+  margin: -1px;
+  background-color: white;
+}
+
+.sphinx-tabs-tab:focus {
+  z-index: 1;
+  outline-offset: 1px;
+}
+
+.sphinx-tabs-panel {
+  position: relative;
+  padding: 1rem;
+  border: None;
+  margin: 0px -1px -1px -1px;
+  border-radius: 0 0 5px 5px;
+  border-top: 0;
+  background: white;
+}
+
+.sphinx-tabs-panel.code-tab {
+  padding: 0.4rem;
+}
+
+.sphinx-tab img {
+  margin-bottom: 24 px;
 }

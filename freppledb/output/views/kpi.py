@@ -1,21 +1,27 @@
 #
-# Copyright (C) 2007-2013 by frePPLe bvba
+# Copyright (C) 2007-2013 by frePPLe bv
 #
-# This library is free software; you can redistribute it and/or modify it
-# under the terms of the GNU Affero General Public License as published
-# by the Free Software Foundation; either version 3 of the License, or
-# (at your option) any later version.
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject to
+# the following conditions:
 #
-# This library is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero
-# General Public License for more details.
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
 #
-# You should have received a copy of the GNU Affero General Public
-# License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+# LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+# WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 from django.db import connections
 
 from freppledb.common.models import Parameter
@@ -23,26 +29,36 @@ from freppledb.common.report import GridReport, GridFieldText, GridFieldInteger
 
 
 class Report(GridReport):
-  title = _("Performance Indicators")
-  frozenColumns = 0
-  basequeryset = Parameter.objects.all()
-  permissions = (("view_kpi_report", "Can view kpi report"),)
-  rows = (
-    GridFieldText('category', title=_('category'), sortable=False, editable=False, align='center'),
-    #. Translators: Translation included with Django
-    GridFieldText('name', title=_('name'), sortable=False, editable=False, align='center'),
-    GridFieldInteger('value', title=_('value'), sortable=False, editable=False, align='center'),
+    title = _("Performance Indicators")
+    frozenColumns = 0
+    basequeryset = Parameter.objects.all()
+    permissions = (("view_kpi_report", "Can view kpi report"),)
+    rows = (
+        GridFieldText(
+            "category",
+            title=_("category"),
+            sortable=False,
+            editable=False,
+            align="center",
+        ),
+        GridFieldText(
+            "name", title=_("name"), sortable=False, editable=False, align="center"
+        ),
+        GridFieldInteger(
+            "value", title=_("value"), sortable=False, editable=False, align="center"
+        ),
     )
-  default_sort = (1, 'asc')
-  filterable = False
-  multiselect = False
-  help_url = 'user-guide/user-interface/plan-analysis/performance-indicator-report.html'
+    default_sort = (1, "asc")
+    filterable = False
+    multiselect = False
+    help_url = "user-interface/plan-analysis/performance-indicator-report.html"
 
-  @staticmethod
-  def query(request, basequery):
-    # Execute the query
-    cursor = connections[request.database].cursor()
-    cursor.execute('''
+    @staticmethod
+    def query(request, basequery):
+        # Execute the query
+        cursor = connections[request.database].cursor()
+        cursor.execute(
+            """
       select 101 as id, 'Problem count' as category, name as name, count(*) as value
       from out_problem
       group by name
@@ -81,8 +97,9 @@ class Report(GridReport):
       select 301, 'Operation', 'Quantity', coalesce(round(sum(quantity)),0)
       from operationplan
       union all
-      select 302, 'Resource', 'Usage', coalesce(round(sum(quantity * extract(epoch from enddate - startdate)) / 86400),0)
+      select 302, 'Resource', 'Usage', coalesce(round(sum(operationplanresource.quantity * extract(epoch from operationplan.enddate - operationplan.startdate)) / 86400),0)
       from operationplanresource
+      inner join operationplan on operationplanresource.operationplan_id = operationplan.reference
       union all
       select 401, 'Material', 'Produced', coalesce(round(sum(quantity)),0)
       from operationplanmaterial
@@ -92,13 +109,9 @@ class Report(GridReport):
       from operationplanmaterial
       where quantity<0
       order by 1
-      '''
-      )
+      """
+        )
 
-    # Build the python result
-    for row in cursor.fetchall():
-      yield {
-        'category': row[1],
-        'name': row[2],
-        'value': row[3],
-        }
+        # Build the python result
+        for row in cursor.fetchall():
+            yield {"category": row[1], "name": row[2], "value": row[3]}

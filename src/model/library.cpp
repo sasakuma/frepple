@@ -1,41 +1,44 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2015 by frePPLe bvba                                 *
+ * Copyright (C) 2007-2015 by frePPLe bv                                   *
  *                                                                         *
- * This library is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU Affero General Public License as published   *
- * by the Free Software Foundation; either version 3 of the License, or    *
- * (at your option) any later version.                                     *
+ * Permission is hereby granted, free of charge, to any person obtaining   *
+ * a copy of this software and associated documentation files (the         *
+ * "Software"), to deal in the Software without restriction, including     *
+ * without limitation the rights to use, copy, modify, merge, publish,     *
+ * distribute, sublicense, and/or sell copies of the Software, and to      *
+ * permit persons to whom the Software is furnished to do so, subject to   *
+ * the following conditions:                                               *
  *                                                                         *
- * This library is distributed in the hope that it will be useful,         *
- * but WITHOUT ANY WARRANTY; without even the implied warranty of          *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the            *
- * GNU Affero General Public License for more details.                     *
+ * The above copyright notice and this permission notice shall be          *
+ * included in all copies or substantial portions of the Software.         *
  *                                                                         *
- * You should have received a copy of the GNU Affero General Public        *
- * License along with this program.                                        *
- * If not, see <http://www.gnu.org/licenses/>.                             *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,         *
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF      *
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND                   *
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE  *
+ * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION  *
+ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION   *
+ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.         *
  *                                                                         *
  ***************************************************************************/
 
 #define FREPPLE_CORE
-#include "frepple/model.h"
 #include <sys/stat.h>
 
-namespace frepple
-{
+#include "frepple/model.h"
+
+namespace frepple {
 
 // Generic Python type for timeline events
 PythonType* EventPythonType = nullptr;
 
-void LibraryModel::initialize()
-{
+void LibraryModel::initialize() {
   // Initialize only once
   static bool init = false;
-  if (init)
-  {
+  if (init) {
     logger << "Warning: Calling frepple::LibraryModel::initialize() more "
-        << "than once." << endl;
+           << "than once." << endl;
     return;
   }
   init = true;
@@ -59,8 +62,9 @@ void LibraryModel::initialize()
   nok += FlowPlan::initialize();
   nok += PeggingIterator::initialize();
   nok += PeggingDemandIterator::initialize();
+  nok += OperationPlanDependency::initialize();
   nok += OperationPlan::InterruptionIterator::intitialize();
-  nok += OperationPlan::initialize();  
+  nok += OperationPlan::initialize();
   nok += Load::initialize();
   nok += LoadBucketizedFromStart::initialize();
   nok += LoadBucketizedFromEnd::initialize();
@@ -69,6 +73,7 @@ void LibraryModel::initialize()
   nok += Flow::initialize();
   nok += FlowPlanIterator::initialize();
   nok += SubOperation::initialize();
+  nok += OperationDependency::initialize();
   nok += Operation::initialize();
   nok += OperationAlternate::initialize();
   nok += OperationSplit::initialize();
@@ -87,8 +92,10 @@ void LibraryModel::initialize()
   nok += BufferInfinite::initialize();
   nok += Demand::initialize();
   nok += DemandDefault::initialize();
+  nok += DemandGroup::initialize();
   nok += Item::initialize();
-  nok += ItemDefault::initialize();
+  nok += ItemMTS::initialize();
+  nok += ItemMTO::initialize();
   nok += SetupMatrixRule::initialize();
   nok += SetupMatrixRuleDefault::initialize();
   nok += SetupMatrix::initialize();
@@ -103,74 +110,70 @@ void LibraryModel::initialize()
   nok += ResourceBuckets::initialize();
   nok += Plan::initialize();
 
-  EventPythonType = Object::registerPythonType(
-    sizeof(TimeLine<Flow>::EventMaxQuantity),
-    &typeid(TimeLine<Flow>::EventMaxQuantity)
-    );
+  EventPythonType =
+      Object::registerPythonType(sizeof(TimeLine<Flow>::EventMaxQuantity),
+                                 &typeid(TimeLine<Flow>::EventMaxQuantity));
 
   // Exit if errors were found
-  if (nok)
-    throw RuntimeException("Error registering new Python types");
+  if (nok) throw RuntimeException("Error registering new Python types");
 
   // Register new methods in Python
   PythonInterpreter::registerGlobalMethod(
-    "printsize", printModelSize, METH_NOARGS,
-    "Print information about the memory consumption.");
+      "printsize", printModelSize, METH_NOARGS,
+      "Print information about the memory consumption.");
   PythonInterpreter::registerGlobalMethod(
-    "erase", eraseModel, METH_VARARGS,
-    "Removes the plan data from memory, and optionally the static info too.");
+      "erase", eraseModel, METH_VARARGS,
+      "Removes the plan data from memory, and optionally the static info too.");
   PythonInterpreter::registerGlobalMethod(
-    "readXMLdata", readXMLdata, METH_VARARGS,
-    "Processes a XML string passed as argument.");
+      "readXMLdata", readXMLdata, METH_VARARGS,
+      "Processes a XML string passed as argument.");
+  PythonInterpreter::registerGlobalMethod("readXMLfile", readXMLfile,
+                                          METH_VARARGS, "Read an XML file.");
+  PythonInterpreter::registerGlobalMethod("saveXMLfile", saveXMLfile,
+                                          METH_VARARGS,
+                                          "Save the model to a XML file.");
   PythonInterpreter::registerGlobalMethod(
-    "readXMLfile", readXMLfile, METH_VARARGS,
-    "Read an XML file.");
+      "saveplan", savePlan, METH_VARARGS,
+      "Save the main plan information to a file.");
   PythonInterpreter::registerGlobalMethod(
-    "saveXMLfile", saveXMLfile, METH_VARARGS,
-    "Save the model to a XML file.");
+      "buffers", Buffer::createIterator, METH_NOARGS,
+      "Returns an iterator over the buffers.");
   PythonInterpreter::registerGlobalMethod(
-    "saveplan", savePlan, METH_VARARGS,
-    "Save the main plan information to a file.");
+      "locations", Location::createIterator, METH_NOARGS,
+      "Returns an iterator over the locations.");
   PythonInterpreter::registerGlobalMethod(
-    "buffers", Buffer::createIterator, METH_NOARGS,
-    "Returns an iterator over the buffers.");
+      "customers", Customer::createIterator, METH_NOARGS,
+      "Returns an iterator over the customers.");
   PythonInterpreter::registerGlobalMethod(
-    "locations", Location::createIterator, METH_NOARGS,
-    "Returns an iterator over the locations.");
+      "suppliers", Supplier::createIterator, METH_NOARGS,
+      "Returns an iterator over the suppliers.");
   PythonInterpreter::registerGlobalMethod(
-    "customers", Customer::createIterator, METH_NOARGS,
-    "Returns an iterator over the customers.");
+      "items", Item::createIterator, METH_NOARGS,
+      "Returns an iterator over the items.");
   PythonInterpreter::registerGlobalMethod(
-    "suppliers", Supplier::createIterator, METH_NOARGS,
-    "Returns an iterator over the suppliers.");
+      "calendars", Calendar::createIterator, METH_NOARGS,
+      "Returns an iterator over the calendars.");
   PythonInterpreter::registerGlobalMethod(
-    "items", Item::createIterator, METH_NOARGS,
-    "Returns an iterator over the items.");
+      "demands", Demand::createIterator, METH_NOARGS,
+      "Returns an iterator over the demands.");
   PythonInterpreter::registerGlobalMethod(
-    "calendars", Calendar::createIterator, METH_NOARGS,
-    "Returns an iterator over the calendars.");
+      "resources", Resource::createIterator, METH_NOARGS,
+      "Returns an iterator over the resources.");
   PythonInterpreter::registerGlobalMethod(
-    "demands", Demand::createIterator, METH_NOARGS,
-    "Returns an iterator over the demands.");
+      "operations", Operation::createIterator, METH_NOARGS,
+      "Returns an iterator over the operations.");
   PythonInterpreter::registerGlobalMethod(
-    "resources", Resource::createIterator, METH_NOARGS,
-    "Returns an iterator over the resources.");
+      "operationplans", OperationPlan::createIterator, METH_VARARGS,
+      "Returns an iterator over the operationplans.");
   PythonInterpreter::registerGlobalMethod(
-    "operations", Operation::createIterator, METH_NOARGS,
-    "Returns an iterator over the operations.");
+      "problems", PythonIterator<Problem::iterator, Problem>::create,
+      METH_NOARGS, "Returns an iterator over the problems.");
   PythonInterpreter::registerGlobalMethod(
-    "operationplans", OperationPlan::createIterator, METH_VARARGS,
-    "Returns an iterator over the operationplans.");
+      "setupmatrices", SetupMatrix::createIterator, METH_NOARGS,
+      "Returns an iterator over the setup matrices.");
   PythonInterpreter::registerGlobalMethod(
-    "problems", PythonIterator<Problem::iterator, Problem>::create, METH_NOARGS,
-    "Returns an iterator over the problems.");
-  PythonInterpreter::registerGlobalMethod(
-    "setupmatrices", SetupMatrix::createIterator, METH_NOARGS,
-    "Returns an iterator over the setup matrices.");
-  PythonInterpreter::registerGlobalMethod(
-    "skills", Skill::createIterator, METH_NOARGS,
-    "Returns an iterator over the skills.");
+      "skills", Skill::createIterator, METH_NOARGS,
+      "Returns an iterator over the skills.");
 }
 
-
-}
+}  // namespace frepple

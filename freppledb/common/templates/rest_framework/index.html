@@ -3,19 +3,45 @@
 {% load i18n %}
 
 {% block extrahead %}{{block.super}}
-<script type="text/javascript">
+<script>
 $(function() {
   $("#jwt").on('input', function() {
   	window.location.href = '{{request.prefix}}/api/?exp=' + $("#jwt").val();
   });
 });
+
+function copyToClipboard(el){
+  var t =  $(el).children().first();
+  navigator.clipboard.writeText(t.html());
+  var icon = $(el).find(".fa").first();
+  var tooltip = bootstrap.Tooltip.getInstance(icon[0]);
+  if (tooltip) tooltip.dispose();
+  icon.attr("data-bs-title", "Copied");
+  tooltip = bootstrap.Tooltip.getOrCreateInstance(icon[0]);
+  tooltip.show();
+  setTimeout(function() {
+      tooltip.dispose();
+      icon.attr("data-bs-title", "Copy to clipboard");
+      bootstrap.Tooltip.getOrCreateInstance(icon[0])
+  }, 1000)
+}
 </script>
 {% endblock %}
 
+{% block tools %}
+<h1 class="d-inline-flex float-end">
+  <a href="{% setting "DOCUMENTATION_URL" %}/docs/{% version_short %}/integration-guide/rest-api/index.html"
+    data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="{% trans 'help'|capfirst|force_escape %}"
+    target="_blank">
+    <span class="fa fa-question"></span>
+  </a>
+</h1>
+{% endblock %}
+
 {% block content %}
-<div id="content-summary" class="row"><div class="col-md-12">
-{% blocktrans %}This page helps developers to learn and experiment with the
-<a style="text-decoration:underline" target="_blank" rel="noopener" href="https://en.wikipedia.org/wiki/Representational_state_transfer">REST</a>
+<div id="content-summary" class="row"><div class="col">
+{% blocktrans with username=request.user.username %}This page helps developers to learn and experiment with the
+<a class="text-decoration-underline" target="_blank" rel="noopener" href="https://en.wikipedia.org/wiki/Representational_state_transfer">REST</a>
 API of frePPLe.<br>
 This API allows your application to exchange information with frePPLe.<br>
 <br>
@@ -26,27 +52,40 @@ The results can be shown in JSON format or as HTML in your browser.<br>
 <br>
 Using tools like 'wget' or 'curl' you can access the API from the command line.<br>
 For instance, to return the list of all sales orders in JSON format:<br><br>
-<div style="margin-left:20px">
-Using <a style="text-decoration:underline" href="https://en.wikipedia.org/wiki/Basic_access_authentication" target="_blank">basic authentication</a>:<br>
-<div class="well well-sm" style="margin-top:5px">
-wget --http-user={{request.user}} --http-password=PASSWORD http://127.0.0.1:8000/api/input/demand/<br><br>
-curl -u {{request.user}}:PASSWORD http://127.0.0.1:8000/api/input/demand/
+<div class="ms-4">
+<div class="mb-2">
+Using <a class="text-decoration-underline" href="https://en.wikipedia.org/wiki/Basic_access_authentication" target="_blank">basic authentication</a>:
 </div>
-Using <a style="text-decoration:underline" href="https://jwt.io/" target="_blank">JSON Web Token authentication</a> valid for the next <input id="jwt" type="number" value="{{exp}}" min="0" step="1" style="width:4em"/>  days:<br>
-<div class="well well-sm" style="margin-top:5px">
-wget --header 'Authorization: Bearer {{token}}' http://127.0.0.1:8000/api/input/demand/<br><br>
-curl -H 'Accept: application/json' --header 'Authorization: Bearer {{token}}' http://127.0.0.1:8000/api/input/demand/
+<div class="card mb-3"><div class="card-body" onclick="copyToClipboard(this)">
+<span>wget --http-user={{username}} --http-password=PASSWORD {{url}}</span>&nbsp;&nbsp;&nbsp;&nbsp;
+<span class="fa fa-clipboard" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="Copy to clipboard"></span>
+</div></div>
+<div class="card mb-3"><div class="card-body" onclick="copyToClipboard(this)">
+<span>curl -u {{username}}:PASSWORD {{url}}</span>&nbsp;&nbsp;&nbsp;&nbsp;
+<span class="fa fa-clipboard" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="Copy to clipboard"></span>
+</div></div>
+<div class="mb-2">
+Using <a class="text-decoration-underline" href="https://jwt.io/" target="_blank">JSON Web Token authentication</a> valid for the next <input id="jwt" class="d-inline form-control p-1" type="number" value="{{exp}}" min="0" step="1" style="width:4em; background:white"/>  days:
 </div>
+<div class="card mb-3"><div class="card-body" onclick="copyToClipboard(this)">
+<span>wget --header 'Authorization: Bearer {{token}}' {{url}}</span>&nbsp;&nbsp;&nbsp;&nbsp;
+<span class="fa fa-clipboard" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="Copy to clipboard"></span>
+</div></div>
+<div class="card mb-3"><div class="card-body" onclick="copyToClipboard(this)">
+<span>curl -H 'Accept: application/json' --header 'Authorization: Bearer {{token}}' {{url}}</span>&nbsp;&nbsp;&nbsp;&nbsp;
+<span class="fa fa-clipboard" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="Copy to clipboard"></span>
+</div></div>
 </div>
 {% endblocktrans %}
 </div></div>
 
-<div class="row"><div class="col-md-12" style="max-width:1100px">
-  <div class="panel panel-default">
-    <div class="panel-heading">
+<div class="row mb-3"><div class="col" style="max-width:1100px">
+  <div class="card">
+    <div class="card-header">
       <b>REST API</b>
     </div>
-    <table class="table table-condensed table-hover">
+    <div class="card-body">
+    <table class="table table-sm table-hover">
       <tr><th></th><th>{% trans 'List API' %}</th><th>{% trans 'Detail API' %}</th></tr>
       {% getMenu as menu %}
       {% for group in menu %}
@@ -57,19 +96,20 @@ curl -H 'Accept: application/json' --header 'Authorization: Bearer {{token}}' ht
             <td>
               <a href="{{request.prefix}}/api/{{  item.1.model|app_label }}/{{  item.1.model|short_model_name }}/ ">
                 {{request.prefix}}/api/{{  item.1.model|app_label }}/{{  item.1.model|short_model_name }}/
-                <span class="leftpadding fa fa-caret-right" role="input/item"></span>
+                <span class="ps-2 fa fa-caret-right" role="input/item"></span>
               </a>
             </td>
             <td><span style="cursor: pointer">
               {{request.prefix}}/api/{{  item.1.model|app_label }}/{{  item.1.model|short_model_name }}/
-              <input type="text" class="vTextField" onChange ="window.location.href = '{{request.prefix}}/api/{{ item.1.model|app_label }}/{{  item.1.model|short_model_name }}/'+encodeURI($(event.target).val())+'/'" maxlength="30" type="text">
-              </input>/<span class="leftpadding fa fa-caret-right"></span>
+              <input type="text" class="d-inline form-control p-1 w-auto" onChange ="window.location.href = '{{request.prefix}}/api/{{ item.1.model|app_label }}/{{  item.1.model|short_model_name }}/'+encodeURI($(event.target).val())+'/'" maxlength="30">
+              <span class="ps-2 fa fa-caret-right"></span>
             </span></td>
           </tr>
           {% endif %}
         {% endfor %}
       {% endfor %}
     </table>
+  </div>
   </div>
 </div></div>
 

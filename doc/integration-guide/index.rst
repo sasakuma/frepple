@@ -2,7 +2,7 @@
 Integration guide
 =================
 
-This chapter describe frePPLe's capabilities to integrate with 
+This chapter describe frePPLe's capabilities to integrate with
 external systems.
 
 The first sections describe the different ways to integrate your data
@@ -23,7 +23,4 @@ interaction with the frePPLe planning engine.
    rest-api/index
    batch-commands
    remote-commands
-   low-level-integration/index
-   odoo-connector
-   openbravo-connector   
-   generic-erp-connector
+   embedding

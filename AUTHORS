@@ -2,8 +2,8 @@
 The primary authors of frePPLe are:
 
 * Johan De Taeye (jdetaeye at frepple dot com)
-* Joao Ranita (jranity at frepple dot com)
 * Hicham Lahlou (hlahlou at frepple dot com)
+* Joao Ranita
 
 And here is an inevitably incomplete list of MUCH-APPRECIATED CONTRIBUTORS --
 people who have submitted patches, reported bugs, and generally made
@@ -85,12 +85,6 @@ FrePPLe redistributes parts of the following third party software components:
     Licensed under the MIT license
     See https://twitter.github.io/typeahead.js/
 
-* contrib\django\freppledb\common\static\bootstrap-datetimepicker.js
-    Redistributed datetimepicker.js
-    Copyright (c) 2015 Jonathan Peterson
-    Licensed under the MIT license
-    See https://github.com/Eonasdan/bootstrap-datetimepicker/
-
 * contrib\django\freppledb\common\static\moment-with-locales.js
     Redistributed moment-with-locales.js
     Copyright (c) 2011-2016 Tim Wood, Iskren Chernev, Moment.js contributors
@@ -127,3 +121,13 @@ FrePPLe redistributes parts of the following third party software components:
     Redistributed angular-websocket.min.js
     Licensed under the MIT license
     See https://github.com/AngularClass/angular-websocket
+
+* src/forecast/exprtk.h
+    Free use of the C++ Mathematical Expression Toolkit Library is
+    permitted under the guidelines and in accordance with the most
+    current version of the MIT License.
+    See https://www.partow.net/programming/exprtk/index.html
+
+* include\rapidjson\*
+    Redistributed http://rapidjson.org/
+    Licensed under the MIT license

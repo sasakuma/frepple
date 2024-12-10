@@ -1,18 +1,24 @@
 #
-# Copyright (C) 2007-2013 by frePPLe bvba
+# Copyright (C) 2007-2013 by frePPLe bv
 #
-# This library is free software; you can redistribute it and/or modify it
-# under the terms of the GNU Affero General Public License as published
-# by the Free Software Foundation; either version 3 of the License, or
-# (at your option) any later version.
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject to
+# the following conditions:
 #
-# This library is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero
-# General Public License for more details.
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
 #
-# You should have received a copy of the GNU Affero General Public
-# License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+# LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+# WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 
 from django.core.signals import request_finished
@@ -25,45 +31,39 @@ from freppledb.common import models as common_models
 from freppledb.common.middleware import resetRequest
 
 
-def removeModelPermissions(app, model, db=DEFAULT_DB_ALIAS):
-  Permission.objects.all().using(db).filter(content_type__app_label=app, content_type__model=model).delete()
-
-
-def createViewPermissions(sender, using=DEFAULT_DB_ALIAS, **kwargs):
-  if using != DEFAULT_DB_ALIAS or 'apps' not in kwargs:
-    return
-  # Create model read permissions
-  for m in kwargs['apps'].get_models():
-    p = Permission.objects.get_or_create(
-           codename='view_%s' % m._meta.model_name,
-           content_type=ContentType.objects.db_manager(using).get_for_model(m)
-           )[0]
-    p.name = 'Can view %s' % m._meta.verbose_name_raw
-    p.save()
+def removeModelPermissions(app, model, db=DEFAULT_DB_ALIAS, exclude=None):
+    q = (
+        Permission.objects.all()
+        .using(db)
+        .filter(content_type__app_label=app, content_type__model=model)
+    )
+    if exclude:
+        q = q.exclude(codename__in=exclude)
+    q.delete()
 
 
 def createExtraPermissions(sender, using=DEFAULT_DB_ALIAS, **kwargs):
-  if using != DEFAULT_DB_ALIAS:
-    return
-  # Create the report permissions for the single menu instance we know about.
-  from freppledb.menu import menu
-  menu.createReportPermissions(sender.name)
-  # Create widget permissions
-  from freppledb.common.dashboard import Dashboard
-  Dashboard.createWidgetPermissions(sender.name)
+    if using != DEFAULT_DB_ALIAS:
+        return
+    from freppledb.menu import menu
+    from freppledb.common.dashboard import Dashboard
+
+    # Create the report permissions for the single menu instance we know about.
+    menu.createReportPermissions(sender.name)
+
+    # Create widget permissions
+    Dashboard.createWidgetPermissions(sender.name)
 
 
 def removePermissions(sender, using=DEFAULT_DB_ALIAS, **kwargs):
-  removeModelPermissions("common", "wizard", using)
-  removeModelPermissions("common", "scenario", using)
-  removeModelPermissions("admin", "logentry", using)
-  removeModelPermissions("contenttypes", "contenttype", using)
-  Permission.objects.all().using(using).filter(codename="add_permission").delete()
-  Permission.objects.all().using(using).filter(codename="change_permission").delete()
-  Permission.objects.all().using(using).filter(codename="delete_permission").delete()
+    removeModelPermissions("admin", "logentry", using)
+    removeModelPermissions("contenttypes", "contenttype", using)
+    Permission.objects.all().using(using).filter(codename="add_permission").delete()
+    Permission.objects.all().using(using).filter(codename="change_permission").delete()
+    Permission.objects.all().using(using).filter(codename="delete_permission").delete()
+    Permission.objects.all().using(using).filter(codename="view_permission").delete()
 
 
 signals.post_migrate.connect(removePermissions)
 signals.post_migrate.connect(createExtraPermissions)
-signals.post_migrate.connect(createViewPermissions)
 request_finished.connect(resetRequest)

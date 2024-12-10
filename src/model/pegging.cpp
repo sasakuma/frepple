@@ -1,110 +1,116 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2015 by frePPLe bvba                                 *
+ * Copyright (C) 2007-2015 by frePPLe bv                                   *
  *                                                                         *
- * This library is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU Affero General Public License as published   *
- * by the Free Software Foundation; either version 3 of the License, or    *
- * (at your option) any later version.                                     *
+ * Permission is hereby granted, free of charge, to any person obtaining   *
+ * a copy of this software and associated documentation files (the         *
+ * "Software"), to deal in the Software without restriction, including     *
+ * without limitation the rights to use, copy, modify, merge, publish,     *
+ * distribute, sublicense, and/or sell copies of the Software, and to      *
+ * permit persons to whom the Software is furnished to do so, subject to   *
+ * the following conditions:                                               *
  *                                                                         *
- * This library is distributed in the hope that it will be useful,         *
- * but WITHOUT ANY WARRANTY; without even the implied warranty of          *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the            *
- * GNU Affero General Public License for more details.                     *
+ * The above copyright notice and this permission notice shall be          *
+ * included in all copies or substantial portions of the Software.         *
  *                                                                         *
- * You should have received a copy of the GNU Affero General Public        *
- * License along with this program.                                        *
- * If not, see <http://www.gnu.org/licenses/>.                             *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,         *
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF      *
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND                   *
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE  *
+ * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION  *
+ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION   *
+ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.         *
  *                                                                         *
  ***************************************************************************/
 
 #define FREPPLE_CORE
 #include "frepple/model.h"
 
-namespace frepple
-{
+namespace frepple {
 
 const MetaCategory* PeggingIterator::metadata;
 const MetaCategory* PeggingDemandIterator::metadata;
 
+thread_local MemoryPool<PeggingIterator::state> PeggingIterator::peggingpool;
 
-int PeggingIterator::initialize()
-{
+int PeggingIterator::initialize() {
   // Initialize the pegging metadata
-  PeggingIterator::metadata = MetaCategory::registerCategory<PeggingIterator>("pegging","peggings");
+  PeggingIterator::metadata =
+      MetaCategory::registerCategory<PeggingIterator>("pegging", "peggings");
   registerFields<PeggingIterator>(const_cast<MetaCategory*>(metadata));
 
   // Initialize the Python type
-  PythonType& x = PythonExtension<PeggingIterator>::getPythonType();
+  auto& x = PythonExtension<PeggingIterator>::getPythonType();
   x.setName("peggingIterator");
   x.setDoc("frePPLe iterator for operationplan pegging");
   x.supportgetattro();
   x.supportiter();
-  const_cast<MetaCategory*>(PeggingIterator::metadata)->pythonClass = x.type_object();
+  PeggingIterator::metadata->setPythonClass(x);
   return x.typeReady();
 }
 
-
-int PeggingDemandIterator::initialize()
-{
+int PeggingDemandIterator::initialize() {
   // Initialize the pegging metadata
-  PeggingDemandIterator::metadata = MetaCategory::registerCategory<PeggingDemandIterator>("demandpegging", "demandpeggings");
+  PeggingDemandIterator::metadata =
+      MetaCategory::registerCategory<PeggingDemandIterator>("demandpegging",
+                                                            "demandpeggings");
   registerFields<PeggingDemandIterator>(const_cast<MetaCategory*>(metadata));
 
   // Initialize the Python type
-  PythonType& x = PythonExtension<PeggingDemandIterator>::getPythonType();
+  auto& x = PythonExtension<PeggingDemandIterator>::getPythonType();
   x.setName("peggingDemandIterator");
   x.setDoc("frePPLe iterator for demand pegging");
   x.supportgetattro();
   x.supportiter();
-  const_cast<MetaCategory*>(PeggingDemandIterator::metadata)->pythonClass = x.type_object();
+  PeggingDemandIterator::metadata->setPythonClass(x);
   return x.typeReady();
 }
 
-
-PeggingIterator::PeggingIterator(const PeggingIterator& c)
-: downstream(c.downstream), firstIteration(c.firstIteration), first(c.first), second_pass(c.second_pass)
-{
-  initType(metadata);
-  for (statestack::const_iterator i = c.states.begin(); i != c.states.end(); ++i)
-    states.push_back( state(i->opplan, i->quantity, i->offset, i->level) );
-  for (deque<state>::const_iterator i = c.states_sorted.begin(); i != c.states_sorted.end(); ++i)
-    states_sorted.push_back(state(i->opplan, i->quantity, i->offset, i->level));
+PeggingIterator& PeggingIterator::operator=(const PeggingIterator& c) {
+  downstream = c.downstream;
+  firstIteration = c.firstIteration;
+  first = c.first;
+  second_pass = c.second_pass;
+  maxlevel = c.maxlevel;
+  states = c.states;
+  states_sorted = c.states_sorted;
+  return *this;
 }
 
-
-PeggingIterator::PeggingIterator(const Demand* d)
-  : downstream(false), firstIteration(true), first(false), second_pass(false)
-{
+PeggingIterator::PeggingIterator(const Demand* d, short maxLvl)
+    : states(PeggingIterator::peggingpool),
+      states_sorted(PeggingIterator::peggingpool),
+      downstream(false),
+      firstIteration(true),
+      first(false),
+      second_pass(false),
+      maxlevel(maxLvl) {
   initType(metadata);
-  const Demand::OperationPlanList &deli = d->getDelivery();
-  for (Demand::OperationPlanList::const_iterator opplaniter = deli.begin();
-      opplaniter != deli.end(); ++opplaniter)
-  {
-    OperationPlan *t = (*opplaniter)->getTopOwner();
-    updateStack(t, t->getQuantity(), 0.0, 0);
+  const Demand::OperationPlanList& deli = d->getDelivery();
+  for (auto opplaniter = deli.begin(); opplaniter != deli.end(); ++opplaniter) {
+    OperationPlan* t = (*opplaniter)->getTopOwner();
+    updateStack(t, t->getQuantity(), 0.0, 0, 0L);
   }
 
   // Bring all pegging information to a second stack.
   // Only in this way can we avoid that the same operationplan is returned
   // multiple times
-  while (operator bool())
-  {
-    /** Check if already found in the vector. */
+  while (operator bool()) {
+    /* Check if already found in the vector. */
     bool found = false;
     state& curtop = states.back();
-    for (deque<state>::iterator it = states_sorted.begin(); it != states_sorted.end() && !found; ++it)
-      if (it->opplan == curtop.opplan)
-      {
+    for (auto it = states_sorted.begin(); it != states_sorted.end() && !found;
+         ++it)
+      if (it->opplan == curtop.opplan) {
         // Update existing element in sorted stack
         it->quantity += curtop.quantity;
-        if (it->level > curtop.level)
-          it->level = curtop.level;
+        if (it->level > curtop.level) it->level = curtop.level;
         found = true;
       }
     if (!found)
       // New element in sorted stack
-      states_sorted.push_back( state(curtop.opplan, curtop.quantity, curtop.offset, curtop.level) );
+      states_sorted.insert(curtop.opplan, curtop.quantity, curtop.offset,
+                           curtop.level, curtop.gap);
 
     if (downstream)
       ++*this;
@@ -116,62 +122,64 @@ PeggingIterator::PeggingIterator(const Demand* d)
   second_pass = true;
 }
 
-
-PeggingIterator::PeggingIterator(const OperationPlan* opplan, bool b)
-  : downstream(b), firstIteration(true), first(false), second_pass(false)
-{
+PeggingIterator::PeggingIterator(const OperationPlan* opplan, bool b,
+                                 short maxlevel)
+    : states(PeggingIterator::peggingpool),
+      states_sorted(PeggingIterator::peggingpool),
+      downstream(b),
+      firstIteration(true),
+      first(false),
+      second_pass(false),
+      maxlevel(maxlevel) {
   initType(metadata);
   if (!opplan) return;
-  if (opplan->getTopOwner()->getOperation()->getType() == *OperationSplit::metadata)
-    updateStack(
-      opplan,
-      opplan->getQuantity(),
-      0.0,
-      0
-      );
+  if (opplan->getTopOwner()->getOperation()->hasType<OperationSplit>() ||
+      maxlevel > 0)
+    updateStack(opplan, opplan->getQuantity(), 0.0, 0, 0L);
   else
-    updateStack(
-      opplan->getTopOwner(),
-      opplan->getTopOwner()->getQuantity(),
-      0.0,
-      0
-      );
+    updateStack(opplan->getTopOwner(), opplan->getTopOwner()->getQuantity(),
+                0.0, 0, 0L);
 }
 
-
-PeggingIterator::PeggingIterator(FlowPlan* fp, bool b)
-  : downstream(b), firstIteration(true), first(false), second_pass(false)
-{
+PeggingIterator::PeggingIterator(const FlowPlan* fp, bool b)
+    : states(PeggingIterator::peggingpool),
+      states_sorted(PeggingIterator::peggingpool),
+      downstream(b),
+      firstIteration(true),
+      first(false),
+      second_pass(false),
+      maxlevel(-1) {
   initType(metadata);
   if (!fp) return;
-  updateStack(
-    fp->getOperationPlan()->getTopOwner(),
-    fp->getOperationPlan()->getQuantity(),
-    0.0,
-    0
-    );
+  if (maxlevel > 0)
+    updateStack(fp->getOperationPlan(), fp->getOperationPlan()->getQuantity(),
+                0.0, 0, 0L);
+  else
+    updateStack(fp->getOperationPlan()->getTopOwner(),
+                fp->getOperationPlan()->getQuantity(), 0.0, 0, 0L);
 }
-
 
 PeggingIterator::PeggingIterator(LoadPlan* lp, bool b)
-  : downstream(b), firstIteration(true), first(false), second_pass(false)
-{
+    : states(PeggingIterator::peggingpool),
+      states_sorted(PeggingIterator::peggingpool),
+      downstream(b),
+      firstIteration(true),
+      first(false),
+      second_pass(false),
+      maxlevel(-1) {
   initType(metadata);
   if (!lp) return;
-  updateStack(
-    lp->getOperationPlan()->getTopOwner(),
-    lp->getOperationPlan()->getQuantity(),
-    0.0,
-    0
-    );
+  if (maxlevel > 0)
+    updateStack(lp->getOperationPlan(), lp->getOperationPlan()->getQuantity(),
+                0.0, 0, 0L);
+  else
+    updateStack(lp->getOperationPlan()->getTopOwner(),
+                lp->getOperationPlan()->getQuantity(), 0.0, 0, 0L);
 }
 
-
-PeggingIterator& PeggingIterator::operator--()
-{
+PeggingIterator& PeggingIterator::operator--() {
   // Second pass
-  if (second_pass)
-  {
+  if (second_pass) {
     states_sorted.pop_front();
     return *this;
   }
@@ -179,14 +187,13 @@ PeggingIterator& PeggingIterator::operator--()
   // Validate
   if (states.empty())
     throw LogicException("Incrementing the iterator beyond it's end");
-  if (downstream)
-    throw LogicException("Decrementing a downstream iterator");
+  if (downstream) throw LogicException("Decrementing a downstream iterator");
 
   // Mark the top entry in the stack as invalid, so it can be reused.
   first = true;
 
   // Find other operationplans to add to the stack
-  state t = states.back(); // Copy the top element
+  state& t = states.back();  // Copy the top element
   followPegging(t.opplan, t.quantity, t.offset, t.level);
 
   // Pop invalid top entry from the stack.
@@ -197,12 +204,9 @@ PeggingIterator& PeggingIterator::operator--()
   return *this;
 }
 
-
-PeggingIterator& PeggingIterator::operator++()
-{
+PeggingIterator& PeggingIterator::operator++() {
   // Second pass
-  if (second_pass)
-  {
+  if (second_pass) {
     states_sorted.pop_front();
     return *this;
   }
@@ -210,14 +214,13 @@ PeggingIterator& PeggingIterator::operator++()
   // Validate
   if (states.empty())
     throw LogicException("Incrementing the iterator beyond it's end");
-  if (!downstream)
-    throw LogicException("Incrementing an upstream iterator");
+  if (!downstream) throw LogicException("Incrementing an upstream iterator");
 
   // Mark the top entry in the stack as invalid, so it can be reused.
   first = true;
 
   // Find other operationplans to add to the stack
-  state t = states.back(); // Copy the top element
+  state& t = states.back();  // Copy the top element
   followPegging(t.opplan, t.quantity, t.offset, t.level);
 
   // Pop invalid top entry from the stack.
@@ -228,44 +231,116 @@ PeggingIterator& PeggingIterator::operator++()
   return *this;
 }
 
-
-void PeggingIterator::followPegging
-(const OperationPlan* op, double qty, double offset, short lvl)
-{
+void PeggingIterator::followPegging(const OperationPlan* op, double qty,
+                                    double offset, short lvl) {
   // Zero quantity operationplans don't have further pegging
   if (!op->getQuantity()) return;
 
+  // Did we reach the maximum depth we want to visit
+  // If the operation is hidden, we allow one more level
+  if (maxlevel != -1 && lvl > maxlevel && !op->getOperation()->getHidden())
+    return;
+
   // For each flowplan ask the buffer to find the pegged operationplans.
   if (downstream)
-    for (OperationPlan::FlowPlanIterator i = op->beginFlowPlans();
-        i != op->endFlowPlans(); ++i)
-    {
-      if (i->getQuantity() > ROUNDING_ERROR) // Producing flowplan
-        i->getFlow()->getBuffer()->followPegging(*this, &*i, qty, offset, lvl+1);
+    for (auto i = op->beginFlowPlans(); i != op->endFlowPlans(); ++i) {
+      if (i->getQuantity() > ROUNDING_ERROR)  // Producing flowplan
+        i->getFlow()->getBuffer()->followPegging(*this, &*i, qty, offset,
+                                                 lvl + 1);
     }
   else
-    for (OperationPlan::FlowPlanIterator i = op->beginFlowPlans();
-        i != op->endFlowPlans(); ++i)
-    {
-      if (i->getQuantity() < -ROUNDING_ERROR) // Consuming flowplan
-        i->getFlow()->getBuffer()->followPegging(*this, &*i, qty, offset, lvl+1);
+    for (auto i = op->beginFlowPlans(); i != op->endFlowPlans(); ++i) {
+      if (i->getQuantity() < -ROUNDING_ERROR)  // Consuming flowplan
+        i->getFlow()->getBuffer()->followPegging(*this, &*i, qty, offset,
+                                                 lvl + 1);
     }
 
   // Push child operationplans on the stack.
   // The pegged quantity is equal to the ratio of the quantities of the
   // parent and child operationplan.
-  for (OperationPlan::iterator j(op); j != OperationPlan::end(); ++j)
-    updateStack(
-      &*j,
-      qty * j->getQuantity() / op->getQuantity(),
-      offset * j->getQuantity() / op->getQuantity(),
-      lvl+1
-      );
+
+  if (maxlevel > 0) {
+    if (lvl <= maxlevel - 1 || op->getOperation()->getHidden()) {
+      // DOWNSTREAM
+      if (downstream) {
+        // In downstream, a routing operation will send its first step
+        if (op->getOperation()->hasType<OperationRouting>()) {
+          for (OperationPlan::iterator j(op); j != OperationPlan::end(); ++j) {
+            updateStack(&*j, qty * j->getQuantity() / op->getQuantity(),
+                        offset * j->getQuantity() / op->getQuantity(), lvl + 1,
+                        0L);
+            break;
+          }
+        }
+
+        // In downstream, a routing suboperation will send the next suboperation
+        if (op->getOwner() &&
+            op->getOwner()->getOperation()->hasType<OperationRouting>() &&
+            op->getNextSubOpplan()) {
+          updateStack(
+              op->getNextSubOpplan(),
+              qty * op->getNextSubOpplan()->getQuantity() / op->getQuantity(),
+              offset * op->getNextSubOpplan()->getQuantity() /
+                  op->getQuantity(),
+              lvl + 1, 0L);
+        }
+      } else {
+        // UPSTREAM
+        // In upstream, a routing operation will send its last step
+        if (op->getOperation()->hasType<OperationRouting>()) {
+          OperationPlan* opplan_last;
+          for (OperationPlan::iterator j(op); j != OperationPlan::end(); ++j) {
+            opplan_last = &*j;
+          }
+          if (opplan_last)
+            updateStack(opplan_last,
+                        qty * opplan_last->getQuantity() / op->getQuantity(),
+                        offset * opplan_last->getQuantity() / op->getQuantity(),
+                        lvl + 1, 0L);
+        }
+
+        // In upstream, a routing suboperation will send the previous
+        // suboperation
+        if (op->getOwner() &&
+            op->getOwner()->getOperation()->hasType<OperationRouting>() &&
+            op->getPrevSubOpplan()) {
+          updateStack(
+              op->getPrevSubOpplan(),
+              qty * op->getPrevSubOpplan()->getQuantity() / op->getQuantity(),
+              offset * op->getPrevSubOpplan()->getQuantity() /
+                  op->getQuantity(),
+              lvl + 1, 0L);
+        }
+      }
+    }
+  } else {
+    for (OperationPlan::iterator j(op); j != OperationPlan::end(); ++j) {
+      updateStack(&*j, qty * j->getQuantity() / op->getQuantity(),
+                  offset * j->getQuantity() / op->getQuantity(), lvl + 1, 0L);
+    }
+  }
+
+  // Push dependencies on the stack.
+  for (auto d : op->getDependencies()) {
+    auto o = downstream ? d->getSecond() : d->getFirst();
+    auto exists = visited.find(o);
+    if (exists != visited.end()) continue;
+    visited.insert(o);
+    if (downstream && d->getFirst() == op && (maxlevel == -1 || lvl < maxlevel))
+      updateStack(d->getSecond(),
+                  qty * d->getSecond()->getQuantity() / op->getQuantity(),
+                  offset * d->getSecond()->getQuantity() / op->getQuantity(),
+                  lvl + 1, 0L);
+    else if (!downstream && d->getSecond() == op &&
+             (maxlevel == -1 || lvl < maxlevel))
+      updateStack(d->getFirst(),
+                  qty * d->getFirst()->getQuantity() / op->getQuantity(),
+                  offset * d->getFirst()->getQuantity() / op->getQuantity(),
+                  lvl + 1, 0L);
+  }
 }
 
-
-PeggingIterator* PeggingIterator::next()
-{
+PeggingIterator* PeggingIterator::next() {
   if (firstIteration)
     firstIteration = false;
   else if (downstream)
@@ -278,71 +353,99 @@ PeggingIterator* PeggingIterator::next()
     return this;
 }
 
-
-void PeggingIterator::updateStack
-(const OperationPlan* op, double qty, double o, short lvl)
-{
+void PeggingIterator::updateStack(const OperationPlan* op, double qty, double o,
+                                  short lvl, Duration gap) {
   // Avoid very small pegging quantities
   if (qty < ROUNDING_ERROR) return;
 
-  if (first)
-  {
+  // Check for loops in the pegging
+  for (auto e = states.begin(); e != states.end(); ++e) {
+    if (e->opplan == op && abs(e->quantity - qty) < ROUNDING_ERROR &&
+        abs(e->offset - o) < ROUNDING_ERROR)  // We've been here before...
+      return;
+  }
+
+  if (first) {
     // Update the current top element of the stack
     state& t = states.back();
     t.opplan = op;
     t.quantity = qty;
     t.offset = o;
     t.level = lvl;
+    t.gap = gap;
     first = false;
-  }
-  else
+  } else
     // We need to create a new element on the stack
-    states.push_back( state(op, qty, o, lvl) );
+    states.insert(op, qty, o, lvl, gap);
 }
 
-
-PeggingDemandIterator::PeggingDemandIterator(const PeggingDemandIterator& c)
-{
+PeggingDemandIterator::PeggingDemandIterator(const OperationPlan* opplan) {
   initType(metadata);
-  dmds.insert(c.dmds.begin(), c.dmds.end());
-}
 
+  // a map to track the demands pegged to that opplan
+  // for every demand we are also tracking the different delivery orders
+  // in another map with the pegged offet and qty from that delivery order
+  map<Demand*, map<const OperationPlan*, vector<pair<double, double>>>> mapvar;
 
-PeggingDemandIterator::PeggingDemandIterator(const OperationPlan* opplan)
-{
-  initType(metadata);
   // Walk over all downstream operationplans till demands are found
-  for (PeggingIterator p(opplan); p; ++p)
-  {
+  for (PeggingIterator p(opplan); p; ++p) {
     const OperationPlan* m = p.getOperationPlan();
-    if (!m)
-      continue;
+    if (!m || (m != m->getTopOwner())) continue;
     Demand* dmd = m->getTopOwner()->getDemand();
-    if (!dmd || p.getQuantity() < ROUNDING_ERROR)
-      continue;
-    map<Demand*, double>::iterator i = dmds.lower_bound(dmd);
-    if (i != dmds.end() && i->first == dmd)
-      // Pegging to the same demand multiple times
-      i->second += p.getQuantity();
-    else
-      // Adding demand
-      dmds.insert(i, make_pair(dmd, p.getQuantity()));
+    if (dmd && p.getQuantity() > ROUNDING_ERROR)
+      mapvar[dmd][m].emplace_back(
+          make_pair(p.getOffset(), p.getOffset() + p.getQuantity()));
+  }
+
+  // Iterate over all demands and compute the pegged quantity
+  // by excluding overlapping intervals
+  for (const auto& it : mapvar) {
+    double quantity = 0.0;
+    for (auto& it2 : it.second) {
+      quantity +=
+          sumOfIntervals(const_cast<vector<pair<double, double>>&>(it2.second));
+    }
+    dmds.insert({it.first, quantity});
   }
 }
 
-
-PeggingDemandIterator* PeggingDemandIterator::next()
-{
-  if (first)
-  {
+PeggingDemandIterator* PeggingDemandIterator::next() {
+  if (first) {
     iter = dmds.begin();
     first = false;
-  }
-  else
+  } else
     ++iter;
-  if (iter == dmds.end())
-    return nullptr;
+  if (iter == dmds.end()) return nullptr;
   return this;
 }
 
-} // End namespace
+double PeggingDemandIterator::sumOfIntervals(
+    vector<pair<double, double>>& intervals) {
+  if (intervals.empty()) return 0.0;
+
+  // Sort intervals by their starting point
+  sort(intervals.begin(), intervals.end());
+
+  double totalSum = 0.0;
+  double currentStart = intervals[0].first;
+  double currentEnd = intervals[0].second;
+
+  for (size_t i = 1; i < intervals.size(); ++i) {
+    double start = intervals[i].first;
+    double end = intervals[i].second;
+    if (start <= currentEnd) {  // Overlapping intervals
+      currentEnd = max(currentEnd, end);
+    } else {  // Non-overlapping interval
+      totalSum += currentEnd - currentStart;
+      currentStart = start;
+      currentEnd = end;
+    }
+  }
+
+  // Add the last merged interval
+  totalSum += currentEnd - currentStart;
+
+  return totalSum;
+}
+
+}  // namespace frepple

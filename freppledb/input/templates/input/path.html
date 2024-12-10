@@ -2,7 +2,7 @@
 {% load i18n %}
 
 {% block extrahead %}{{block.super}}
-<style type="text/css">
+<style>
 svg {
   background-color: #FFF;
   cursor: default;
@@ -17,7 +17,7 @@ path.flow {
   fill: none;
   stroke: #000;
   cursor: default;
-  marker-mid: url(#arrow); // IE can't display links if this line is active...
+  marker-mid: url(#arrow);
 }
 
 path.load {
@@ -27,6 +27,13 @@ path.load {
   stroke-dasharray: 5,5;
 }
 
+path.depends {
+  fill: none;
+  stroke: #000;
+  cursor: default;
+  marker-mid: url(#dependsmarker);
+}
+
 text {
   font: 10px sans-serif;
   pointer-events: none;
@@ -34,21 +41,19 @@ text {
 
 text.id {
   text-anchor: middle;
-  font-weight: bold;
 }
 </style>
-<script type="text/javascript" src="{{STATIC_URL}}js/d3.min.js"></script>
-<script type="text/javascript">
+<script src="{{STATIC_URL}}js/d3.min.js"></script>
+<script>
 
 function reslistfmt(cellvalue, options, row)
 {
   if (cellvalue === undefined || cellvalue ==='') return '';
-  result = '';
+  var result = '';
   for (var i in cellvalue)
-    result += "<span>" + cellvalue[i][0]
-      + "<a href='/detail/input/resource/key/' onclick='opendetail(event)'>"
-      + "<span class='leftpadding fa fa-caret-right' role='input/resource'></span>"
-      + "</a></span><br>";
+    result += cellvalue[i][0]
+      + "<a href=\"" + url_prefix + "/detail/input/resource/" + admin_escape(cellvalue[i][0]) + "/\">"
+      + "<span class='ps-2 fa fa-caret-right'></span></a><br>";
   return result;
 }
 
@@ -56,26 +61,27 @@ var force;
 var nodes = [];
 var links = [];
 var operations = {};
+var operindices = {};
 var buffers = {};
 var resources = {};
 var width = 800;
 var width_level = 100;
 var minlevel = 0;
 var maxlevel = 0;
-
+var path;
+var shapes;
 
 function clickedShaped(d)
 {
-  var result = '';
-
-  if (typeof(d) === undefined || typeof(d) ==='') return;
-  if (d.hasOwnProperty('type') && (d.type === 'purchase' || d.type === 'itemsupplier' || d.type === 'itemdistribution' )) {
-    return; //don't show links for non existing operations
-  } else {
-    var result = url_prefix + '/detail/input/' + d.type + '/' + admin_escape(d.name) +'/';
-  }
-
-  window.open(result, "_self");
+  if (
+  	d.hasOwnProperty('type')
+  	&& ['routing',  'purchase', 'itemsupplier', 'itemdistribution'].includes(d.type)
+  	)
+    return; // Don't show links for non existing operations
+  window.open(
+  	url_prefix + '/detail/input/' + d.type.replace('_alternate', '') + '/' + admin_escape(d.name) +'/',
+  	"_self"
+  	);
 }
 
 
@@ -86,7 +92,7 @@ function tick(e)
   // Bring operations vertically closer to the center and
   // horizontally close to the position linked to their level.
   shapes.attr('transform', function(d, i) {
-    if (d.type == 'operation' || d.type == 'routing' || d.type == 'split' || d.type == 'alternate' || d.type == 'buffer')
+    if (d.type == 'operation' || d.type == 'operation_alternate' || d.type == 'routing' || d.type == 'split' || d.type == 'alternate' || d.type == 'buffer')
     {
       if (d.parent >= 0)
       {
@@ -99,8 +105,14 @@ function tick(e)
         else
         {
           // Suboperation of a routing
-          d.y = nodes[d.parent].y;
-          d.x = nodes[d.parent].x - 52.5 + (d.suboperindex-0.5) * 105 / nodes[d.parent].numsuboperations;
+          if (d.rownb > 0) {
+          	d.y = nodes[d.parent].y - 40 + (d.rownb-0.5) * 80 / nodes[d.parent].rownb;
+          	d.x = nodes[d.parent].x - 52.5 + (d.colnb-0.5) * 105 / nodes[d.parent].colnb;
+    	  }
+    	  else {
+    	  	d.y = nodes[d.parent].y;
+          	d.x = nodes[d.parent].x - 52.5 + (d.suboperindex-0.5) * 105 / nodes[d.parent].numsuboperations;
+    	 }
         }
       }
       else
@@ -110,9 +122,13 @@ function tick(e)
            d.y += (1000 - d.y) * k / 10;
       }
     }
-    if (d.parent >= 0 && d.suboperindex >= 0)
+    if (d.parent >= 0 && d.suboperindex >= 0) {
       // Suboperation of a routing
-      return 'translate(' + d.x + ' ' + d.y + ') scale(' + (1.0/nodes[d.parent].numsuboperations) + ' 1)';
+      if (d.rownb > 0)
+      	return 'translate(' + d.x + ' ' + d.y + ') scale(' + (1.0/nodes[d.parent].colnb) + ' 1)';
+      else
+      	return 'translate(' + d.x + ' ' + d.y + ') scale(' + (1.0/nodes[d.parent].numsuboperations) + ' 1)';
+	}
     else
       return 'translate(' + d.x + ' ' + d.y + ')';
     });
@@ -134,7 +150,7 @@ function drawGraph(jsondata)
   if ($("#svggraph").children().length > 1)
   	// It has already been drawn!
   	return;
-  
+
   var count = -1;
   for (var oper in jsondata['rows'])
   {
@@ -151,14 +167,24 @@ function drawGraph(jsondata)
     if ('parentoper' in jsondata['rows'][oper])
       parentoper = operations[jsondata['rows'][oper]['parentoper']];
     var nodetype = 'operation';
+    if (jsondata['rows'][oper]['alternate'] == 'true')
+    	nodetype = 'operation_alternate';
     if (jsondata['rows'][oper]['type'] == 'alternate'
       || jsondata['rows'][oper]['type'] == 'routing'
       || jsondata['rows'][oper]['type'] == 'split')
       nodetype = jsondata['rows'][oper]['type'];
-    else if (jsondata['rows'][oper]['type'] == 'purchase')
-      nodetype = 'itemsupplier';
-    else if (jsondata['rows'][oper]['type'] == 'distribution')
-      nodetype = 'itemdistribution';
+    else if (jsondata['rows'][oper]['type'] == 'purchase') {
+    	if (jsondata['rows'][oper]['alternate'] == 'true')
+          nodetype = 'itemsupplier_alternate';
+    	else
+    	  nodetype = 'itemsupplier';
+    }
+    else if (jsondata['rows'][oper]['type'] == 'distribution') {
+    	if (jsondata['rows'][oper]['alternate'] == 'true')
+            nodetype = 'itemdistribution_alternate';
+      	else
+      	  nodetype = 'itemdistribution';
+    }
     var numsuboperations = 0;
     if ('numsuboperations' in jsondata['rows'][oper])
       numsuboperations = Math.abs(parseInt(jsondata['rows'][oper]['numsuboperations']));
@@ -173,9 +199,28 @@ function drawGraph(jsondata)
        suboperindex: parseInt(jsondata['rows'][oper]['suboperation']),
        numsuboperations: numsuboperations,
        y: 1000 + count,
-       charge: parentoper>-1 ? 0 : -200
+       charge: parentoper>-1 ? 0 : -200,
+       rownb: parseInt(jsondata['rows'][oper]['rownb']),
+       colnb: parseInt(jsondata['rows'][oper]['colnb']),
        }) - 1;
     operations[jsondata['rows'][oper]['operation']] = count;
+
+    // Check if a blocking/blockedby operation exists
+
+    if (jsondata['rows'][oper]['blockedby'] != null)
+      for (var i = 0; i < jsondata['rows'][oper]['blockedby'].length; i++) {
+          if (jsondata['rows'][oper]['blockedby'][i][0] in operations) {
+            links.push({source: nodes[operations[jsondata['rows'][oper]['blockedby'][i][0]]], target: nodes[operindex], type: 'depends'});
+          }
+      }
+    if (jsondata['rows'][oper]['blocking'] != null)
+    for (var i = 0; i < jsondata['rows'][oper]['blocking'].length; i++) {
+        if (jsondata['rows'][oper]['blocking'][i][0] in operations) {
+          links.push({source: nodes[operindex], target: nodes[operations[jsondata['rows'][oper]['blocking'][i][0]]], type: 'depends'});
+        }
+    }
+
+
 
     // Add nodes for the resources and load links
     for (var res in jsondata['rows'][oper]['resources'])
@@ -238,13 +283,6 @@ function drawGraph(jsondata)
     }
   }
 
-  // Oh dear, that's too much to visualize sensibly
-  if (links.length > 400 || nodes.length > 400)
-  {
-    $('#graph').html("<br>&nbsp;{% trans 'Too many objects to display' %}");
-    return;
-  }
-
   // Compute the initial horizontal position
   width = $("#graph").width();
   width_level = width / (maxlevel - minlevel + 1);
@@ -253,7 +291,7 @@ function drawGraph(jsondata)
     nodes[i].x = width_level * (0.5 + maxlevel - nodes[i].level);
 
   // Initialize D3 force layout
-  svg = d3.select('#svggraph')
+  var svg = d3.select('#svggraph')
     .attr('width', width)
     .attr('height', 2000)
     .attr('viewBox','0 0 ' + width + ' 400')
@@ -301,7 +339,10 @@ function drawGraph(jsondata)
            return "scale(1,"+ (2+d.numsuboperations) +")";
          else
            // Top routing operation
-           return "scale(1,1.4)";
+           if (d.rownb > 0)
+           	return "translate(0 -8) scale(1,"+ (1+d.rownb) +")";
+           else
+           	return "scale(1,1.4)";
        }
        else
          return '';
@@ -309,7 +350,7 @@ function drawGraph(jsondata)
     //.call(force.drag);
 
   // Show node IDs
-  g.filter( function(d, i) {return d.type != 'operation' || d.suboperindex <= 0;} )
+  g.filter( function(d, i) {return (d.type != 'operation' && d.type != 'operation_alternate')|| d.suboperindex <= 0;} )
    .append('svg:text')
    .attr('x', 0)
    .attr('y', 4)
@@ -346,8 +387,7 @@ $(function(){
       var gridheight = $(window).height() - $("#content-main").offset().top - 40;
       if (gridheight < 200)
       	gridheight = 200;
-      $("#grid").css({height: gridheight + "px"});
-      $("#grid").setGridHeight(gridheight - $(".ui-jqgrid-pager").height());
+      $("#grid").setGridHeight(gridheight);
     }
   });
 
@@ -384,7 +424,9 @@ treeReader: {
 ExpandColClick: true,
 {% endblock %}
 
-{% block tools %}{% tabs model %}{% endblock %}
+{% block tools %}{% include "common/snippet_follow.html" %}{% endblock %}
+
+{% block tabs %}{% tabs model %}{% endblock %}
 
 {% block before_table %}
 <div class="row" id="graphrow" style="min-height: 100px; text-align: center;">
@@ -395,6 +437,10 @@ ExpandColClick: true,
     <polygon points="0,-5 10,0 0,5" style="fill: #000;">
     </polygon>
   </marker>
+  <marker id="dependsmarker" viewBox="0 -5 10 10" refX="6" markerWidth="5" markerHeight="5" orient="auto">
+    <polygon points="0,-5 10,0 0,5 5,0" style="fill: black">
+    </polygon>
+  </marker>
   <rect id="operation" class="operation" width="100" height="25" x="-50" y="-9" rx="2" ry="2"
     style="cursor: pointer; fill: #1f77b4;">
   </rect>
@@ -403,6 +449,14 @@ ExpandColClick: true,
   </rect>
   <rect id="itemdistribution" class="itemdistribution" width="100" height="25" x="-50" y="-9" rx="2" ry="2"
     style="cursor: pointer; fill: #1f77b4;">
+  <rect id="operation_alternate" class="operation_alternate" width="100" height="25" x="-50" y="-9" rx="2" ry="2"
+    style="cursor: pointer; fill: #a8d1f0;">
+  </rect>
+  <rect id="itemsupplier_alternate" class="itemsupplier_alternate" width="100" height="25" x="-50" y="-9" rx="2" ry="2"
+    style="cursor: pointer; fill: #a8d1f0;">
+  </rect>
+  <rect id="itemdistribution_alternate" class="itemdistribution_alternate" width="100" height="25" x="-50" y="-9" rx="2" ry="2"
+    style="cursor: pointer; fill: #a8d1f0;">
   </rect>
   <rect id="routing" class="routing" width="110" height="25" x="-55" y="-9" rx="2" ry="2"
     style="cursor: pointer; fill: #ffffff; stroke: black; vector-effect: non-scaling-stroke;">

@@ -1,26 +1,51 @@
-## How to contribute to frePPLe
+## How to contribute
 
-#### **Do you have some suggestions for enhancements?**
+### **Questions? Have some enhancement ideas?**
 
-* Post your suggestion to the [user group](https://groups.google.com/forum/#!forum/frepple-users)
+* The [discussion forum](https://github.com/frePPLe/frepple/discussions) is to best place to post any question and ideas.
 
-#### **Did you find a bug?**
+### **Found something unclear or incorrect in the documentation?**
 
-* Do not open up a GitHub issue if the bug is a **security vulnerability**, 
-  and [report it](mailto:security@frepple.com) to us directly.
+* A pull request to improve the documentation (even just fixing a typo) is one of the easiest ways to contribute to frePPLe.
 
-* If you're unsure whether the behavior is due to a misconfiguration or a software bug, first **post your issue
-  to the [user group](https://groups.google.com/forum/#!forum/frepple-users)**.
+  All [online documentation pages](https://frepple.com/docs/current/) have an "edit on github" link that links to the
+  page in [this repository](https://github.com/frePPLe/frepple/tree/master/doc). It can't be simpler than this...
 
-* **Ensure the bug was not already reported** by searching on GitHub under [Issues](https://github.com/frePPLe/frepple/issues).
+### **Found something funny or incorrect in the translations?**
 
-* If you're unable to find an open issue addressing the problem, [open a new one](https://github.com/frePPLe/frepple/issues/issues/new).
-  Be sure to include a **title**, clear **description** and, if appropriate, a **screenshot** or a **dataset** demonstrating the problem.
+* To get the user interface correctly translated to your language, we rely on
+  contributions from our community. There are AI-generated translations available,
+  but these will often miss the subtle nuances of your language.
 
-#### **Do you want to update translations or add a new language?**
+  [Updating a translation](https://frepple.com/docs/current/developer-guide/translating-the-user-interface.php)
+  is and easy and clear process. It's a single file to edit and submit as a pull request.
+  It's also an easy way to contribute to frePPLe.
 
-* This process is documented [here](https://frepple.com/docs/4.4/developer-guide/user-interface/translating-the-user-interface.html)
+### **Did you find a bug?**
 
-#### **Any other questions?**
+* **Do not open up a GitHub issue if the bug is a security vulnerability**, and instead to refer to
+  our [security policy](https://github.com/frePPLe/frepple/security/policy).
 
-* Feel free to [contact us](mailto:info@frepple.com). We are easy going and all ears to your input, feedback and questions.
+* **Ensure the bug was not already reported by searching the [Issues](https://github.com/frePPLe/frepple/issues).
+
+* If you're unable to find an open issue addressing the problem, [open a new one](https://github.com/frePPLe/frepple/issues/new).
+  Be sure to include a **title and clear description** and as much information as possible (such as version, operating system,
+  screenshots, steps to reproduce, small datasets...) demonstrating the expected behavior that is not occurring.
+
+  Keep any sample datasets as small and simple as possible. Digging through large and complex datasets is very
+  time consuming for the people that are trying to help you.
+
+### **Did you write code that fixes a bug or implements an enhancement?**
+
+* Open a new GitHub pull request with the patch.
+
+* Assure your pull request follows our coding styles.
+
+  Python code is formatted using [black](https://black.readthedocs.io/en/stable/).
+
+  C++ code is formatted using the [Google code style](https://google.github.io/styleguide/cppguide.html)
+
+  When you use the cool [Visual Studio Code](https://code.visualstudio.com/) as development environment
+  this formatting should happen automatically.
+
+Thanks! :heart: :heart: :heart:

@@ -1,188 +1,168 @@
 #
-# Copyright (C) 2016 by frePPLe bvba
+# Copyright (C) 2016 by frePPLe bv
 #
-# This library is free software; you can redistribute it and/or modify it
-# under the terms of the GNU Affero General Public License as published
-# by the Free Software Foundation; either version 3 of the License, or
-# (at your option) any later version.
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject to
+# the following conditions:
 #
-# This library is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero
-# General Public License for more details.
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
 #
-# You should have received a copy of the GNU Affero General Public
-# License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+# LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+# WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 
 from django.conf import settings
-from django.contrib.auth.models import AnonymousUser
-from django.contrib.admin.models import LogEntry
-from django.db import DEFAULT_DB_ALIAS, connections
-from django.template.loader import render_to_string
+from django.db import DEFAULT_DB_ALIAS
 from django.utils import formats
+from django.utils.encoding import force_str
 from django.utils.html import escape
-from django.utils.translation import ugettext_lazy as _
 from django.utils.text import capfirst
-from django.utils.encoding import force_text
+from django.utils.timesince import timesince
+from django.utils.translation import gettext_lazy as _
 
-from freppledb import VERSION
+from freppledb import __version__
 from freppledb.common.dashboard import Dashboard, Widget
-from freppledb.common.models import Comment
+from freppledb.common.models import Notification
 
 
 class WelcomeWidget(Widget):
-  name = "welcome"
-  title = _("Welcome")
-  tooltip = _("Some links to get started")
-  asynchronous = False
+    name = "welcome"
+    title = _("Welcome")
+    tooltip = _("Some links to get started")
+    asynchronous = False
 
-  def render(self, request=None):
-    from freppledb.common.middleware import _thread_locals
-    versionnumber = VERSION.split('.', 2)
-    try:
-      db = _thread_locals.request.database
-      if not db or db == DEFAULT_DB_ALIAS:
-        prefix = ''
-      else:
-        prefix = "/%s" % _thread_locals.request.database
-    except:
-      prefix = ''
-    return _('''Welcome to the world's leading open source production planning tool!<br><br>
+    def render(self, request=None):
+        from freppledb.common.middleware import _thread_locals
+
+        try:
+            versionnumber = __version__.split(".", 2)
+            docurl = "%s/docs/%s.%s/index.html" % (
+                settings.DOCUMENTATION_URL,
+                versionnumber[0],
+                versionnumber[1],
+            )
+        except Exception:
+            docurl = "%s/docs/current/index.html" % (settings.DOCUMENTATION_URL,)
+
+        try:
+            db = _thread_locals.request.database
+            if not db or db == DEFAULT_DB_ALIAS:
+                prefix = ""
+            else:
+                prefix = "/%s" % _thread_locals.request.database
+        except Exception:
+            prefix = ""
+        return (
+            _(
+                """Welcome to the world's leading open source production planning tool!<br><br>
 How to get started?
-<ol><li>Start the <span class="underline"><a href="javascript:void(0);" onclick="tour.start('0,0,0'); return false;">guided tour</a></span></li>
-<li>Check out the <span class="underline"><a href="%(docurl)s" target="_blank" rel="noopener">documentation</a></span></li>
-<li>Start building your own model using the <span class="underline"><a href="%(prefix)s/wizard/" target="_blank" rel="noopener">wizard</a></span></li>
-<li>Visit and join the <span class="underline"><a href="http://groups.google.com/group/frepple-users" target="_blank" rel="noopener">user community</a></span></li>
-<li><span class="underline"><a href="https://frepple.com/contact/" target="_blank" rel="noopener">Contact us</a></span></li>
+<ol>
+<li>Check out the <span class="text-decoration-underline"><a href="%(docurl)s" target="_blank" rel="noopener">documentation</a></span></li>
+<li>Visit and join the <span class="text-decoration-underline"><a href="https://github.com/frePPLe/frepple/discussions" target="_blank" rel="noopener">user community</a></span></li>
+<li><span class="text-decoration-underline"><a href="https://frepple.com/company/#contact" target="_blank" rel="noopener">Contact us</a></span></li>
 </ol>
-''') % {
-  'docurl': "%s/docs/%s.%s/" % (settings.DOCUMENTATION_URL, versionnumber[0], versionnumber[1]),
-  'prefix': prefix
-  }
+"""
+            )
+            % {"docurl": docurl, "prefix": prefix}
+        )
+
 
 Dashboard.register(WelcomeWidget)
 
 
-class WizardWidget(Widget):
-  name = "wizard"
-  title = _("Path to unlock features")
-  tooltip = _("Fill out the data tables and access new features.")
-  asynchronous = False
-  url = '/wizard/'
-
-  def render(self, request=None):
-    return '\n'.join([
-      '<div id="content-main">',
-      '<div id="wizardsvg" style="max-width: 1220px; display: block;">',
-      render_to_string("common/wizard.svg", {
-        'hasForecast': 'freppledb.forecast' in settings.INSTALLED_APPS,
-        'hasIP': 'freppledb.inventoryplanning' in settings.INSTALLED_APPS,
-        }),
-      '</div></div>'
-      ])
-
-  javascript = '''
-    var website = "%s";
-    $(function() {
-       wizard.updateWizard();
-    });
-    ''' % settings.DOCUMENTATION_URL
-
-Dashboard.register(WizardWidget)
-
-
 class NewsWidget(Widget):
-  name = "news"
-  title = _("News")
-  tooltip = _("Show the latest news items from the frePPLe website")
-  asynchronous = False
+    name = "news"
+    title = _("News")
+    tooltip = _("Show the latest news items from the frePPLe website")
+    asynchronous = False
 
-  def render(self, request=None):
-    return '<iframe style="width:100%; border:none;" src="https://frepple.com/news-summary/"></iframe>'
+    def render(self, request=None):
+        return '<iframe style="width:100%; border:none;" src="https://frepple.com/news-summary/"></iframe>'
+
 
 Dashboard.register(NewsWidget)
 
 
-class RecentActionsWidget(Widget):
-  name = "recent_actions"
-  title = _("My Actions")
-  tooltip = _("Display a list of the entities you recently changed")
-  asynchronous = False
-  limit = 10
+class InboxWidget(Widget):
+    name = "inbox"
+    title = _("inbox")
+    tooltip = _("Unread messages from your inbox")
+    url = "/inbox/"
+    asynchronous = False
+    limit = 10
 
-  def render(self, request=None):
-    # This code is a slightly modified version of a standard Django tag.
-    # The only change is to look for the logentry records in the right database.
-    # See the file django\contrib\admin\templatetags\log.py
-    from freppledb.common.middleware import _thread_locals
-    try:
-      db = _thread_locals.request.database or DEFAULT_DB_ALIAS
-    except:
-      db = DEFAULT_DB_ALIAS
-    if isinstance(_thread_locals.request.user, AnonymousUser):
-      q = LogEntry.objects.using(db).select_related('content_type', 'user')[:self.limit]
-    else:
-      q = LogEntry.objects.using(db).filter(user__id__exact=_thread_locals.request.user.pk).select_related('content_type', 'user')[:self.limit]
-    result = []
-    for entry in q:
-      if entry.is_change():
-        result.append('<span style="display: inline-block;" class="fa fa-pencil"></span><a href="%s%s">&nbsp;%s</a>' % (_thread_locals.request.prefix, entry.get_admin_url(), escape(entry.object_repr)))
-      elif entry.is_addition():
-        result.append('<span style="display: inline-block;" class="fa fa-plus"></span><a href="%s%s">&nbsp;%s</a>' % (_thread_locals.request.prefix, entry.get_admin_url(), escape(entry.object_repr)))
-      elif entry.is_deletion():
-        result.append('<span style="display: inline-block;" class="fa fa-minus"></span>&nbsp;%s' % escape(entry.object_repr))
-      else:
-        raise "Unexpected log entry type"
-      if entry.content_type:
-        result.append('<span class="small">%s</span><br>' % capfirst(force_text(_(entry.content_type.name))) )
-      else:
-        result.append('<span class="small">%s</span><br>' % force_text(_('Unknown content')))
-    #. Translators: Translation included with Django
-    return result and '\n'.join(result) or force_text(_('None available'))
+    def render(self, request=None):
+        from freppledb.common.middleware import _thread_locals
 
-Dashboard.register(RecentActionsWidget)
+        try:
+            db = _thread_locals.request.database or DEFAULT_DB_ALIAS
+        except Exception:
+            db = DEFAULT_DB_ALIAS
+        notifs = list(
+            Notification.objects.using(db)
+            .filter(user=_thread_locals.request.user)
+            .order_by("-id")
+            .select_related("comment", "user")[: self.limit]
+        )
+        if not notifs:
+            return """
+              <div class="pull-left"><i class="fa fa-5x fa-trophy" style="color: gold"></i>&nbsp;&nbsp;</div>
+              <h2>Congrats!</h2>
+              Your inbox is empty.
+              """
+        result = []
+        result.append(
+            '<div class="table-responsive"><table class="table table-sm table-hover"><tbody>'
+        )
+        for notif in notifs:
+            result.append(
+                """<tr><td>
+                <a class="text-decoration-underline" href="%s%s">%s</a>&nbsp;<span class="small">%s</span>
+                <div class="small pull-right" data-bs-toggle="tooltip" data-bs-title="%s %s">%s%s&nbsp;&nbsp;%s</div>
+                <br><p style="padding-left: 10px; display: inline-block">%s</p>"""
+                % (
+                    _thread_locals.request.prefix,
+                    notif.comment.getURL(),
+                    notif.comment.object_repr,
+                    escape(
+                        capfirst(force_str(_(notif.comment.content_type.name)))
+                        if notif.comment.content_type
+                        else ""
+                    ),
+                    escape(notif.comment.user.get_full_name()),
+                    formats.date_format(notif.comment.lastmodified, "DATETIME_FORMAT"),
+                    '<img class="avatar-sm" src="/uploads/%s">&nbsp;'
+                    % notif.comment.user.avatar
+                    if notif.comment.user.avatar
+                    else "",
+                    escape(notif.comment.user.username),
+                    timesince(notif.comment.lastmodified),
+                    notif.comment.comment
+                    if notif.comment.safe()
+                    else escape(notif.comment.comment),
+                )
+                + "</td></tr>"
+            )
+        result.append("</tbody></table></div>")
+        return "\n".join(result)
 
-
-class RecentCommentsWidget(Widget):
-  name = "recent_comments"
-  title = _("comments")
-  tooltip = _("Display a list of recent comments")
-  url = '/data/common/comment/?sord=desc&sidx=lastmodified'
-  asynchronous = False
-  limit = 10
-
-  def render(self, request=None):
-    from freppledb.common.middleware import _thread_locals
-    try:
-      db = _thread_locals.request.database or DEFAULT_DB_ALIAS
-    except:
-      db = DEFAULT_DB_ALIAS
-    cmts = Comment.objects.using(db).order_by('-lastmodified').select_related('content_type', 'user')[:self.limit]
-    result = []
-    result.append('<div class="table-responsive"><table class="table table-condensed table-hover"><tbody>');
-    for c in cmts:
-      result.append('<tr><td><a href="%s%s">%s</a>&nbsp;<span class="small">%s</span><div class="small" style="float: right;">%s&nbsp;&nbsp;%s</div><br><p style="padding-left: 10px; display: inline-block;">%s</p>' % (
-        _thread_locals.request.prefix, c.get_admin_url(), escape(c.object_pk),
-        escape(capfirst(force_text(_(c.content_type.name))) if c.content_type else force_text(_('Unknown content'))),
-        escape(c.user.username if c.user else ''),
-        formats.date_format(c.lastmodified, 'SHORT_DATETIME_FORMAT'),
-        escape(c.comment)
-        )+'</td></tr>')
-    result.append('</tbody></table></div>')
-    #. Translators: Translation included with Django
-    return '\n'.join(result) if result else force_text(_('None available'))
-
-  javascript = '''
+    javascript = """
     var hasForecast = %s;
     var hasIP = %s;
-    var version = '%s.%s';
-    ''' % (
-      'true' if 'freppledb.forecast' in settings.INSTALLED_APPS else 'false',
-      'true' if 'freppledb.inventoryplanning' in settings.INSTALLED_APPS else 'false',
-      VERSION.split('.', 2)[0],
-      VERSION.split('.', 2)[1]
-      )
+    """ % (
+        "true" if "freppledb.forecast" in settings.INSTALLED_APPS else "false",
+        "true" if "freppledb.inventoryplanning" in settings.INSTALLED_APPS else "false",
+    )
 
 
-Dashboard.register(RecentCommentsWidget)
+Dashboard.register(InboxWidget)

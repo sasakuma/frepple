@@ -1,156 +1,230 @@
 #
-# Copyright (C) 2007-2013 by frePPLe bvba
+# Copyright (C) 2007-2013 by frePPLe bv
 #
-# This library is free software; you can redistribute it and/or modify it
-# under the terms of the GNU Affero General Public License as published
-# by the Free Software Foundation; either version 3 of the License, or
-# (at your option) any later version.
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject to
+# the following conditions:
 #
-# This library is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero
-# General Public License for more details.
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
 #
-# You should have received a copy of the GNU Affero General Public
-# License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+# LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+# WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
-
-from datetime import datetime
 
 from django import forms
+from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import Group
-from django.forms.utils import ErrorList
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 
-from freppledb.common.models import User, Parameter, Comment, Bucket, BucketDetail
-from freppledb.common.adminforms import MultiDBModelAdmin, MultiDBTabularInline
+from .models import Attribute, User, Parameter, Comment, Follower, Bucket, BucketDetail
+from .adminforms import MultiDBUserCreationForm, MultiDBModelAdmin
 from freppledb.admin import data_site
 
 
+@admin.register(User, site=data_site)
 class MyUserAdmin(UserAdmin, MultiDBModelAdmin):
-  '''
-  This class is a frePPLe specific override of its standard
-  Django base class.
-  '''
-  save_on_top = True
+    save_on_top = True
 
-  change_user_password_template = 'auth/change_password.html'
+    add_form = MultiDBUserCreationForm
+    add_fieldsets = (
+        (
+            _("Personal info"),
+            {"fields": ("username", ("first_name", "last_name"), "email")},
+        ),
+        (_("password"), {"fields": ("password1", "password2")}),
+        (_("scenario access"), {"fields": ("scenarios",)}),
+    )
 
-  fieldsets = (
-    (None, {'fields': ('username', 'password')}),
-    # Translators: Translation included with Django
-    (_('Personal info'), {'fields': ('first_name', 'last_name', 'email')}),
-    (_('Permissions in this scenario'), {'fields': ('is_active', 'is_superuser',
-                                   'groups', 'user_permissions')}),
-    (_('Important dates'), {'fields': ('last_login', 'date_joined')}),
-  )
+    change_user_password_template = "auth/change_password.html"
+    fieldsets = (
+        (None, {"fields": ("username", "password")}),
+        (
+            _("Personal info"),
+            {"fields": ("first_name", "last_name", "email", "avatar")},
+        ),
+        (
+            _("Permissions in this scenario"),
+            {"fields": ("is_active", "is_superuser", "groups", "user_permissions")},
+        ),
+        (_("Important dates"), {"fields": ("last_login", "date_joined")}),
+    )
 
-  tabs = [
-    {"name": 'edit', "label": _("edit"), "view": "admin:common_user_change", "permission": 'common.change_user'},
-    {"name": 'comments', "label": _("comments"), "view": "admin:common_user_comment"},
-    # Translators: Translation included with Django
-    {"name": 'history', "label": _("History"), "view": "admin:common_user_history"},
+    tabs = [
+        {
+            "name": "edit",
+            "label": _("edit"),
+            "view": "admin:common_user_change",
+            "permission": "common.change_user",
+        },
+        {
+            "name": "messages",
+            "label": _("messages"),
+            "view": "admin:common_user_comment",
+        },
     ]
 
-  def get_readonly_fields(self, request, obj=None):
-    if obj:
-      return self.readonly_fields + ('last_login', 'date_joined')
-    return self.readonly_fields
+    def get_readonly_fields(self, request, obj=None):
+        if obj:
+            return self.readonly_fields + ("last_login", "date_joined")
+        return self.readonly_fields
 
-  def has_delete_permission(self, request, obj=None):
-    # Users can't be deleted. Just mark them as inactive instead
-    return False
-
-data_site.register(User, MyUserAdmin)
+    def has_delete_permission(self, request, obj=None):
+        # Admin user can't be deleted.
+        return not obj or obj.username != "admin"
 
 
+class MyGroupAdminForm(forms.ModelForm):
+    """
+    ModelForm that adds an additional multiple select field for managing
+    the users in the group.
+    """
+
+    users = forms.ModelMultipleChoiceField(
+        User.objects.all(),
+        widget=admin.widgets.FilteredSelectMultiple("Users", False),
+        required=False,
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk:
+            initial_users = self.instance.user_set.values_list("pk", flat=True)
+            self.initial["users"] = initial_users
+
+    def save(self, *args, **kwargs):
+        kwargs["commit"] = True
+        return super().save(*args, **kwargs)
+
+    def save_m2m(self):
+        self.instance.user_set.clear()
+        self.instance.user_set.add(*self.cleaned_data["users"])
+
+
+@admin.register(Group, site=data_site)
 class MyGroupAdmin(MultiDBModelAdmin):
-  # This class re-implements the GroupAdmin class from
-  # django.contrib.auth.admin, but without the performance optimization
-  # trick it uses. Our version of the Admin is slower (as it generates much
-  # more database queries), but it works on frepple's multi-database setups.
-  search_fields = ('name',)
-  ordering = ('name',)
-  filter_horizontal = ('permissions',)
-  save_on_top = True
-  tabs = [
-    {"name": 'edit', "label": _("edit"), "view": "admin:auth_group_change", "permission": 'auth.change_group'},
-    {"name": 'comments', "label": _("comments"), "view": "admin:auth_group_comment"},
-    # Translators: Translation included with Django
-    {"name": 'history', "label": _("History"), "view": "admin:auth_group_history"},
+    # This class re-implements the GroupAdmin class from
+    # django.contrib.auth.admin, but without the performance optimization
+    # trick it uses. Our version of the Admin is slower (as it generates much
+    # more database queries), but it works on frepple's multi-database setups.
+    search_fields = ("name",)
+    ordering = ("name",)
+    filter_horizontal = ("permissions",)
+    save_on_top = True
+    form = MyGroupAdminForm
+    tabs = [
+        {
+            "name": "edit",
+            "label": _("edit"),
+            "view": "admin:auth_group_change",
+            "permission": "auth.change_group",
+        },
+        {
+            "name": "messages",
+            "label": _("messages"),
+            "view": "admin:auth_group_comment",
+        },
     ]
-data_site.register(Group, MyGroupAdmin)
 
 
-class ParameterForm(forms.ModelForm):
-  class Meta:
-    model = Parameter
-    fields = ('name', 'value', 'description')
-
-  def clean(self):
-    cleaned_data = self.cleaned_data
-    name = cleaned_data.get("name")
-    value = cleaned_data.get("value")
-    # Currentdate parameter must be a date+time value
-    if name == "currentdate":
-      try:
-        datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
-      except:
-        self._errors["value"] = ErrorList([_("Invalid date: expecting YYYY-MM-DD HH:MM:SS")])
-        del cleaned_data["value"]
-    return cleaned_data
-
-
+@admin.register(Parameter, site=data_site)
 class Parameter_admin(MultiDBModelAdmin):
-  model = Parameter
-  save_on_top = True
-  form = ParameterForm
-  exclude = ('source',)
-  tabs = [
-    {"name": 'edit', "label": _("edit"), "view": "admin:common_parameter_change", "permission": 'common.change_parameter'},
-    {"name": 'comments', "label": _("comments"), "view": "admin:common_parameter_comment"},
-    # Translators: Translation included with Django
-    {"name": 'history', "label": _("History"), "view": "admin:common_parameter_history"},
+    model = Parameter
+    save_on_top = True
+    exclude = ("source",)
+    tabs = [
+        {
+            "name": "edit",
+            "label": _("edit"),
+            "view": "admin:common_parameter_change",
+            "permission": "common.change_parameter",
+        },
+        {
+            "name": "messages",
+            "label": _("messages"),
+            "view": "admin:common_parameter_comment",
+        },
     ]
-data_site.register(Parameter, Parameter_admin)
 
 
+@admin.register(Comment, site=data_site)
 class Comment_admin(MultiDBModelAdmin):
-  model = Comment
-  save_on_top = True
-data_site.register(Comment, Comment_admin)
+    model = Comment
+    save_on_top = True
 
 
-class BucketDetail_inline(MultiDBTabularInline):
-  model = BucketDetail
-  max_num = 10
-  extra = 3
-  exclude = ('source',)
+@admin.register(Follower, site=data_site)
+class Follower_admin(MultiDBModelAdmin):
+    model = Follower
+    exclude = ("user", "args")
+    save_on_top = True
 
 
+@admin.register(BucketDetail, site=data_site)
 class BucketDetail_admin(MultiDBModelAdmin):
-  model = BucketDetail
-  save_on_top = True
-  exclude = ('source', 'id')
-  tabs = [
-    {"name": 'edit', "label": _("edit"), "view": "admin:common_bucketdetail_change", "permission": 'common.change_bucketdetail'},
-    {"name": 'comments', "label": _("comments"), "view": "admin:common_bucketdetail_comment"},
-    # Translators: Translation included with Django
-    {"name": 'history', "label": _("History"), "view": "admin:common_bucketdetail_history"},
+    model = BucketDetail
+    save_on_top = True
+    exclude = ("source", "id")
+    tabs = [
+        {
+            "name": "edit",
+            "label": _("edit"),
+            "view": "admin:common_bucketdetail_change",
+            "permission": "common.change_bucketdetail",
+        },
+        {
+            "name": "messages",
+            "label": _("messages"),
+            "view": "admin:common_bucketdetail_comment",
+        },
     ]
-data_site.register(BucketDetail, BucketDetail_admin)
 
 
+@admin.register(Bucket, site=data_site)
 class Bucket_admin(MultiDBModelAdmin):
-  model = Bucket
-  save_on_top = True
-  inlines = [ BucketDetail_inline, ]
-  exclude = ('source',)
-  tabs = [
-    {"name": 'edit', "label": _("edit"), "view": "admin:common_bucket_change", "permission": 'common.change_bucket'},
-    {"name": 'comments', "label": _("comments"), "view": "admin:common_bucket_comment"},
-    # Translators: Translation included with Django
-    {"name": 'history', "label": _("History"), "view": "admin:common_bucket_history"},
+    model = Bucket
+    save_on_top = True
+    exclude = ("source",)
+    tabs = [
+        {
+            "name": "edit",
+            "label": _("edit"),
+            "view": "admin:common_bucket_change",
+            "permission": "common.change_bucket",
+        },
+        {
+            "name": "messages",
+            "label": _("messages"),
+            "view": "admin:common_bucket_comment",
+        },
     ]
-data_site.register(Bucket, Bucket_admin)
+
+
+@admin.register(Attribute, site=data_site)
+class Attribute_admin(MultiDBModelAdmin):
+    model = Attribute
+    save_on_top = True
+    exclude = ("source",)
+    tabs = [
+        {
+            "name": "edit",
+            "label": _("edit"),
+            "view": "admin:common_attribute_change",
+            "permission": "common.change_attribute",
+        },
+        {
+            "name": "messages",
+            "label": _("messages"),
+            "view": "admin:common_attribute_comment",
+        },
+    ]

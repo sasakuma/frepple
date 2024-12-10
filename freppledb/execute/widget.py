@@ -1,44 +1,78 @@
 #
-# Copyright (C) 2014 by frePPLe bvba
+# Copyright (C) 2014 by frePPLe bv
 #
-# This library is free software; you can redistribute it and/or modify it
-# under the terms of the GNU Affero General Public License as published
-# by the Free Software Foundation; either version 3 of the License, or
-# (at your option) any later version.
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject to
+# the following conditions:
 #
-# This library is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero
-# General Public License for more details.
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
 #
-# You should have received a copy of the GNU Affero General Public
-# License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+# LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+# WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 
-from django.middleware.csrf import get_token
-from django.utils.translation import ugettext_lazy as _
-from django.utils.encoding import force_text
+from django.http import HttpResponse
+from django.utils.translation import gettext_lazy as _
 
 from freppledb.common.dashboard import Dashboard, Widget
 
 
+@Dashboard.register
 class ExecuteWidget(Widget):
-  name = "execute"
-  title = _("Execute")
-  permissions = (("generate_plan", "Can generate plans"),)
-  tooltip = _("Generate a constrained plan")
-  asynchronous = False
-  url = '/execute/'
+    name = "execute"
+    title = _("Create a plan")
+    permissions = (("auth.generate_plan", "Can generate plans"),)
+    tooltip = _("Generate a constrained plan")
+    asynchronous = True
+    repeat = True
+    url = "/execute/#runplan"
 
-  def render(self, request=None):
-    from freppledb.common.middleware import _thread_locals
-    return '''<div style="text-align:center">
-      <form method="post" action="%s/execute/launch/runplan/">
-      <input type="hidden" name="csrfmiddlewaretoken" value="%s">
-      <input type="hidden" name="plantype" value="1"/>
-      <input type="hidden" name="constraint" value="15"/>
-      <input class="btn btn-primary" type="submit" value="%s"/>
-      </form></div>
-      ''' % (_thread_locals.request.prefix, get_token(_thread_locals.request), force_text(_("Create a plan")))
+    javascript_before_repeat = """
+        var tmp = [];
+        $("div.card[data-cockpit-widget='execute'] div.card-body").find("input:checkbox, input:radio").each( function(i) {
+          tmp.push($(this).is(":checked"));
+        });
+        """
 
-Dashboard.register(ExecuteWidget)
+    javascript_after_repeat = """
+        $("div.card[data-cockpit-widget='execute'] div.card-body").find("input:checkbox, input:radio").each( function(i) {
+          $(this).prop("checked", tmp[i]);
+        });
+        """
+
+    def render(self, request=None):
+        from freppledb.common.middleware import _thread_locals
+        from freppledb.execute.management.commands.runplan import Command
+
+        return HttpResponse(
+            Command.getHTML(request or _thread_locals.request, widget=True)
+        )
+
+
+@Dashboard.register
+class ExecuteTaskGroupWidget(Widget):
+    name = "executegroup"
+    title = _("Group tasks")
+    permissions = (("auth.generate_plan", "Can generate plans"),)
+    tooltip = _("Run a sequence of tasks.")
+    asynchronous = True
+    repeat = True
+    url = "/execute/#scheduletasks"
+
+    def render(self, request=None):
+        from freppledb.common.middleware import _thread_locals
+        from freppledb.execute.management.commands.scheduletasks import Command
+
+        return HttpResponse(
+            Command.getHTML(request or _thread_locals.request, widget=True)
+        )

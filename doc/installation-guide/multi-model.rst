@@ -49,6 +49,8 @@ The following steps are required to configure a multi-model setup.
        'PASSWORD': '',
        'HOST': '',
        'OPTIONS': {},
+       'CONN_MAX_AGE': 600,
+       'CONN_HEALTH_CHECKS': True,
        'PORT': '',
        },
      'scenario1': {
@@ -58,6 +60,8 @@ The following steps are required to configure a multi-model setup.
        'PASSWORD': '',
        'HOST': '',
        'OPTIONS': {},
+       'CONN_MAX_AGE': 600,
+       'CONN_HEALTH_CHECKS': True,
        'PORT': '',
        },
      }
@@ -105,11 +109,11 @@ The following steps are required to configure a multi-model setup.
 
   To initialize the additional schemas you copy the default schema with the
   command below. The command can also be executed from the user interface in
-  the execution screen: see :doc:`../user-guide/user-interface/execute`
+  the execution screen: see :doc:`../user-interface/execute`
 
   ::
 
-     frepplectl frepple_copy default my_schema
+     frepplectl scenario_copy default my_schema
 
   The copy process might take a while for bigger datasets. If it takes too long,
   you should consider running the copy as an automated batch job during quiet hours.
@@ -122,7 +126,7 @@ The following steps are required to configure a multi-model setup.
 
   Access rights are controlled for each scenario separately.
 
-  After running the command frepple_copy only 1) the user executing the command
+  After running the command scenario_copy only 1) the user executing the command
   and 2) superusers in the source scenario are marked active in the new scenario.
   Other users can be granted access by marking them active in the new scenario, and
   by assigning them appropriate privileges in it.

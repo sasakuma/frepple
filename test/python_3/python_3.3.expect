@@ -5,7 +5,7 @@
 	<name>locA</name>
 </location>
 <operationplan>
-	<id>19</id>
+	<reference>15</reference>
 	<operation xsi:type="operation_routing">
 		<name>make item</name>
 	</operation>
@@ -57,11 +57,4 @@
 	<name>invalid data</name>
 	<description>No replenishment defined for &apos;buffer2&apos;</description>
 	<weight>1</weight>
-</problem>
-<problem>
-	<name>material excess</name>
-	<description>Buffer &apos;end item&apos; has material excess of 20</description>
-	<start>2009-02-15T09:00:00</start>
-	<end>2009-03-01T20:00:00</end>
-	<weight>20</weight>
 </problem>

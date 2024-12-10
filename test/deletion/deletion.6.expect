@@ -9,12 +9,13 @@
     dangling pointers likely to surface soon and crash the application. Ha...
   </description>
 	<current>2009-01-01T00:00:00</current>
+	<fcst_current>2009-01-01T00:00:00</fcst_current>
 	<locations>
 		<location>
 			<name>All places</name>
 		</location>
 		<location>
-			<name>Sublocation 1</name>
+			<name>Location 1</name>
 			<owner>
 				<name>All places</name>
 			</owner>
@@ -22,7 +23,7 @@
 		<location>
 			<name>Sublocation 2</name>
 			<owner>
-				<name>All places</name>
+				<name>Location 1</name>
 			</owner>
 		</location>
 	</locations>
@@ -86,15 +87,12 @@
 			<maximum_calendar>
 				<name>assembly capacity</name>
 			</maximum_calendar>
+			<location>
+				<name>Location 1</name>
+			</location>
 			<setupmatrix>
 				<name>assembly setup</name>
 			</setupmatrix>
-		</resource>
-		<resource>
-			<name>transport</name>
-			<location>
-				<name>Sublocation 1</name>
-			</location>
 		</resource>
 	</resources>
 	<items>
@@ -117,6 +115,9 @@
 			<item>
 				<name>item 1</name>
 			</item>
+			<location>
+				<name>Location 1</name>
+			</location>
 		</buffer>
 		<buffer>
 			<name>buffer A</name>
@@ -126,12 +127,18 @@
 			<item>
 				<name>component A</name>
 			</item>
+			<location>
+				<name>Location 1</name>
+			</location>
 		</buffer>
 		<buffer>
 			<name>buffer B</name>
 			<item>
 				<name>component B</name>
 			</item>
+			<location>
+				<name>Location 1</name>
+			</location>
 		</buffer>
 	</buffers>
 	<operations>
@@ -270,7 +277,7 @@
 	</setupmatrices>
 	<operationplans>
 		<operationplan>
-			<id>2</id>
+			<reference>1</reference>
 			<operation>
 				<name>delivery 1</name>
 			</operation>
@@ -282,7 +289,7 @@
 			<quantity>1</quantity>
 		</operationplan>
 		<operationplan>
-			<id>3</id>
+			<reference>2</reference>
 			<operation>
 				<name>delivery 1</name>
 			</operation>
@@ -294,7 +301,7 @@
 			<quantity>1</quantity>
 		</operationplan>
 		<operationplan>
-			<id>4</id>
+			<reference>3</reference>
 			<operation>
 				<name>delivery 1</name>
 			</operation>
@@ -306,7 +313,7 @@
 			<quantity>1</quantity>
 		</operationplan>
 		<operationplan>
-			<id>5</id>
+			<reference>4</reference>
 			<operation>
 				<name>make item 1</name>
 			</operation>
@@ -316,7 +323,7 @@
 			<feasible>false</feasible>
 		</operationplan>
 		<operationplan>
-			<id>6</id>
+			<reference>5</reference>
 			<operation>
 				<name>make item 1</name>
 			</operation>
@@ -326,7 +333,7 @@
 			<feasible>false</feasible>
 		</operationplan>
 		<operationplan>
-			<id>7</id>
+			<reference>6</reference>
 			<operation>
 				<name>make item 1</name>
 			</operation>
@@ -336,7 +343,7 @@
 			<feasible>false</feasible>
 		</operationplan>
 		<operationplan>
-			<id>8</id>
+			<reference>7</reference>
 			<operation xsi:type="operation_alternate">
 				<name>supply component A</name>
 			</operation>
@@ -346,7 +353,7 @@
 			<ordertype>ALT</ordertype>
 		</operationplan>
 		<operationplan>
-			<id>9</id>
+			<reference>8</reference>
 			<operation xsi:type="operation_alternate">
 				<name>supply component A</name>
 			</operation>
@@ -356,7 +363,7 @@
 			<ordertype>ALT</ordertype>
 		</operationplan>
 		<operationplan>
-			<id>10</id>
+			<reference>9</reference>
 			<operation xsi:type="operation_alternate">
 				<name>supply component A</name>
 			</operation>
@@ -366,7 +373,7 @@
 			<ordertype>ALT</ordertype>
 		</operationplan>
 		<operationplan>
-			<id>11</id>
+			<reference>10</reference>
 			<operation>
 				<name>supply component A from supplier 1</name>
 			</operation>
@@ -374,11 +381,11 @@
 			<end>2009-01-30T00:00:00</end>
 			<quantity>1</quantity>
 			<owner>
-				<id>8</id>
+				<reference>7</reference>
 			</owner>
 		</operationplan>
 		<operationplan>
-			<id>12</id>
+			<reference>11</reference>
 			<operation>
 				<name>supply component A from supplier 1</name>
 			</operation>
@@ -386,11 +393,11 @@
 			<end>2009-02-27T00:00:00</end>
 			<quantity>1</quantity>
 			<owner>
-				<id>9</id>
+				<reference>8</reference>
 			</owner>
 		</operationplan>
 		<operationplan>
-			<id>13</id>
+			<reference>12</reference>
 			<operation>
 				<name>supply component A from supplier 1</name>
 			</operation>
@@ -398,7 +405,7 @@
 			<end>2009-03-30T00:00:00</end>
 			<quantity>1</quantity>
 			<owner>
-				<id>10</id>
+				<reference>9</reference>
 			</owner>
 		</operationplan>
 	</operationplans>

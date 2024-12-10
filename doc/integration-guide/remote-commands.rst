@@ -2,8 +2,8 @@
 Remote commands
 ===============
 
-All operations from the execution screen can also be launched and
-monitored remotely through an web service API.
+:doc:`/command-reference` from the execution screen can also be launched and
+monitored remotely through a web service API.
 
 * `Reference`_
 * `Authentication`_
@@ -13,49 +13,47 @@ monitored remotely through an web service API.
 Reference
 ---------
 
-The API endpoints can be accessed with any modern web tool or programming 
+The API endpoints can be accessed with any modern web tool or programming
 language using the following URLs. The examples are using the excellent
 `curl command line tool <https://curl.haxx.se/>`_.
 
 * Run a task on the default database:
 
   ::
-  
-   curl -u <user>:<password> http(s)://<server>:<port>/execute/api/<command>/
+
+   curl -X POST -u <user>:<password> http(s)://<server>:<port>/execute/api/<command>/
      --data "<argument1>=<value1>&<argument2>=<value2>"
 
 * Run a task on a scenario database:
 
   ::
-  
-   curl -u <user>:<password> http(s)://<server>:<port>/<scenario>/execute/api/<command>/
+
+   curl -X POST -u <user>:<password> http(s)://<server>:<port>/<scenario>/execute/api/<command>/
      --data "<argument1>=<value1>&<argument2>=<value2>"
 
 * Get the status of all running and pending tasks:
 
   ::
-  
+
    curl -u <user>:<password> http(s)://<server>:<port>/execute/api/status/
 
 * Get the status of a single task:
 
   ::
-  
+
    curl -u <user>:<password> http(s)://<server>:<port>/execute/api/status/?id=X
 
-The following commands are available.
+* Cancel a waiting or running task:
 
-* :ref:`runplan`
-* :ref:`exporttofolder`
-* :ref:`importfromfolder`
-* :ref:`runwebservice`
-* :ref:`scenario_copy`
-* :ref:`backup`
-* :ref:`empty`
-* :ref:`loaddata`
-* :ref:`createbuckets`
-* :ref:`openbravo_import`
-* :ref:`openbravo_export`
+  ::
+
+   curl -u <user>:<password> http(s)://<server>:<port>/execute/api/cancel/?id=X
+
+* Get the log of a single task:
+
+  ::
+
+   curl -u <user>:<password> http(s)://<server>:<port>/execute/api/log/?id=X
 
 All these APIs return a JSON object and they are asynchronous, i.e. they
 don't wait for the actual command to finish. In case you need to wait
@@ -69,9 +67,9 @@ Authentication
 FrePPLe supports 2 methods for authentication of your user in this API:
 
 * | **Basic authentication**
-  | See https://en.wikipedia.org/wiki/Basic_access_authentication for more 
+  | See https://en.wikipedia.org/wiki/Basic_access_authentication for more
     details.
-  | With curl you use the argument ``-u USER:PASSWORD`` on the command line. 
+  | With curl you use the argument ``-u USER:PASSWORD`` on the command line.
 
 * | **JSON Web Token**
   | See https://jwt.io/ for more details.

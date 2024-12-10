@@ -1,7 +1,19 @@
 {% extends "admin/base_site_gridpivot.html" %}
 {% load i18n %}
 
-{% block tools %}{% if args.0 %}{% tabs "input.operation" %}{% endif %}{{block.super}}{% endblock %}
+{% block tools %}
+{% if args.0 %}
+  {% include "common/snippet_follow.html" %}
+{% endif %}
+{{block.super}}
+{% endblock %}
+
+{% block tabs %}
+{% if args.0 %}
+  {% tabs model %}
+{% endif %}
+{{block.super}}
+{% endblock %}
 
 {% block before_table %}{% if args.0 %}
 <div id="graph" style="clear: both; height: 400px; padding: 10px; "></div>
@@ -11,15 +23,16 @@
 {% if args.0 %}$(function(){
   // Resize top graph
   var h = $(window).height();
-  $("#graph").width($(window).width()-60).height(h>800 || h<480 ? 400 : h-420);
+  $("#graph").width($(window).width()-60).height(h>800 || h<550 ? 360 : h-450);
 });{% endif %}
 
 {% if args.0 or mode == "graph" %}
 function drawGraphs(jsondata)
 {
+  $('#curerror').html("");
   {% if args.0 %}var margin = {top: 0, right: 100, bottom: 30, left: 50};
   {% else %}var margin = {top: 0, right: 0, bottom: 0, left: 50};
-  {% endif %}var width = $({% if args.0 %}"#graph"{% else %}"#grid_graph"{% endif %}).width() - margin.left - margin.right;
+  {% endif %}var width = Math.max($({% if args.0 %}"#graph"{% else %}"#grid_graph"{% endif %}).width() - margin.left - margin.right, 0);
   var height = {% if args.0 %}$("#graph").height(){% else %}80{% endif %} - margin.top - margin.bottom;
 
   // Lookup table of displayed columns
@@ -29,7 +42,7 @@ function drawGraphs(jsondata)
 
   // Define X-axis
   var domain_x = [];
-  var bucketnamelength = 0;  
+  var bucketnamelength = 0;
   for (var i in timebuckets)
   {
     domain_x.push(timebuckets[i]['name']);
@@ -37,7 +50,7 @@ function drawGraphs(jsondata)
   }
   var x = d3.scale.ordinal()
     .domain(domain_x)
-    .rangeRoundBands([0, width], .1);
+    .rangeRoundBands([0, width], 0);
   var x_width = x.rangeBand();
   {% if mode == "graph" and not args.0 %}graph.header(margin.left, x);{% endif %}
 
@@ -84,7 +97,7 @@ function drawGraphs(jsondata)
       if (tmp[5] > max_y && 5 in fields)
         max_y = tmp[5];
       else if (tmp[4] > max_y && 4 in fields)
-        max_y = tmp[4];        
+        max_y = tmp[4];
     }
 
     // Update the scale of the Y-axis by looking for the max value
@@ -98,7 +111,7 @@ function drawGraphs(jsondata)
     else {
       barnum[1]--;
       barnum[2]--;
-    }      
+    }
     if (2 in fields || 3 in fields)
       numbars++;
     else
@@ -130,7 +143,7 @@ function drawGraphs(jsondata)
 
 			          window.location ="{{ request.prefix }}"
 			            +"/data/input/manufacturingorder/"
-			            +"?operation__name="+admin_escape(d['operation'])
+			            +"?noautofilter&operation__name="+admin_escape(d['operation'])
 			            +"&startdate__lt="+timebuckets[d['bucket']]['enddate']
 			            +"&startdate__gte="+timebuckets[d['bucket']]['startdate'];
 
@@ -142,8 +155,8 @@ function drawGraphs(jsondata)
         {
           var newtop = y(d['total_start']);
           bucket.append("rect")
-            .attr("width", x_width/numbars) 
-            .attr("x", barnum[0] * x_width / numbars)          
+            .attr("width", x_width/numbars)
+            .attr("x", barnum[0] * x_width / numbars)
             .attr("y", newtop)
             .attr("height", top - newtop)
             .style("fill","#2B95EC")
@@ -153,7 +166,7 @@ function drawGraphs(jsondata)
 
 			          window.location = "{{ request.prefix }}"
 			            +"/data/input/manufacturingorder/"
-			            +"?operation__name="+admin_escape(d['operation'])
+			            +"?noautofilter&operation__name="+admin_escape(d['operation'])
 			            +"&startdate__lt="+timebuckets[d['bucket']]['enddate']
 			            +"&startdate__gte="+timebuckets[d['bucket']]['startdate'];
 
@@ -178,7 +191,7 @@ function drawGraphs(jsondata)
 
 			          window.location = "{{ request.prefix }}"
 			            +"/data/input/manufacturingorder/"
-			            +"?operation__name="+admin_escape(d['operation'])
+			            +"?noautofilter&operation__name="+admin_escape(d['operation'])
 			            +"&startdate__lte="+timebuckets[d['bucket']]['enddate']
 			            +"&enddate__gt="+timebuckets[d['bucket']]['startdate'];
 
@@ -201,7 +214,7 @@ function drawGraphs(jsondata)
 
 			          window.location = "{{ request.prefix }}"
 			            +"/data/input/manufacturingorder/"
-			            +"?operation__name="+admin_escape(d['operation'])
+			            +"?noautofilter&operation__name="+admin_escape(d['operation'])
 			            +"&startdate__lt="+timebuckets[d['bucket']]['enddate']
 			            +"&enddate__gt="+timebuckets[d['bucket']]['startdate'];
 
@@ -225,7 +238,7 @@ function drawGraphs(jsondata)
 
 			          window.location = "{{ request.prefix }}"
 			            +"/data/input/manufacturingorder/"
-			            +"?operation__name="+admin_escape(d['operation'])
+			            +"?noautofilter&operation__name="+admin_escape(d['operation'])
 			            +"&enddate__lte="+timebuckets[d['bucket']]['enddate']
 			            +"&enddate__gt="+timebuckets[d['bucket']]['startdate'];
 
@@ -248,7 +261,7 @@ function drawGraphs(jsondata)
 
 			          window.location = "{{ request.prefix }}"
 			            +"/data/input/manufacturingorder/"
-			            +"?operation__name="+admin_escape(d['operation'])
+			            +"?noautofilter&operation__name="+admin_escape(d['operation'])
 			            +"&enddate__lte="+timebuckets[d['bucket']]['enddate']
 			            +"&enddate__gt="+timebuckets[d['bucket']]['startdate'];
 
@@ -264,43 +277,44 @@ function drawGraphs(jsondata)
 	      .on("click", function(d) {
 	          if (d3.event.defaultPrevented || d['total_start'] == 0) return;
 	          d3.select("#tooltip").style('display', 'none');
-	
+
 	          window.location = "{{ request.prefix }}"
 	            +"/data/input/manufacturingorder/"
-	            +"?operation__name="+admin_escape(d['operation'])
+	            +"?noautofilter&operation__name="+admin_escape(d['operation'])
 	            +"&startdate__lt="+timebuckets[d['bucket']]['enddate']
 	            +"&enddate__gte="+timebuckets[d['bucket']]['startdate'];
-	
+
 	          var coord = d3.mouse(document.body);
 	          d3.event.stopPropagation();
 	        })
 	      .on("mouseenter", function(d) {
 	        graph.showTooltip(
-	          '<div class="panel-heading" style="text-align:center; font-weight:bold">'
+	          '<div style="text-align:center; font-weight:bold">'
 	          + timebuckets[d['bucket']]['name'] + '</div>'
 	          + '<table><tr><td>{{_('proposed starts')|capfirst}}</td><td style="text-align:center">'
-	          + (Math.round(d['proposed_start']*10)/10)
+	          + grid.formatNumber(d['proposed_start'])
 	          + '</td></tr><tr><td>{{_('total starts')|capfirst}}</td><td style="text-align:center">'
-	          + (Math.round(d['total_start']*10)/10)
+	          + grid.formatNumber(d['total_start'])
 	          + '</td></tr><tr><td>{{_('proposed ends')|capfirst}}</td><td style="text-align:center">'
-	          + (Math.round(d['proposed_end']*10)/10)
+	          + grid.formatNumber(d['proposed_end'])
 	          + '</td></tr><tr><td>{{_('total ends')|capfirst}}</td><td style="text-align:center">'
-	          + (Math.round(d['total_end']*10)/10)
+	          + grid.formatNumber(d['total_end'])
 	          + '</td></tr><tr><td>{{_('proposed production')|capfirst}}</td><td style="text-align:center">'
-	          + (Math.round(d['proposed_production']*10)/10)
+	          + grid.formatNumber(d['proposed_production'])
 	          + '</td></tr><tr><td>{{_('total production')|capfirst}}</td><td style="text-align:center">'
-	          + (Math.round(d['total_production']*10)/10)
+	          + grid.formatNumber(d['total_production'])
 	          + '</td></tr></table>'
 	          );
 	        })
 	      .on("mouseleave", graph.hideTooltip)
-	      .on("mousemove", graph.moveTooltip);        
+	      .on("mousemove", graph.moveTooltip);
       });
 
     // Display Y-Axis
     var yAxis = d3.svg.axis()
       .scale(y)
-      .orient("left");
+      .orient("left")
+      .tickFormat(d3.format("s"));
     {% if not args.0 %}
     svg.append("g")
       .attr("class", "miniaxis")
@@ -362,67 +376,72 @@ function crosses (cellvalue, options, rowdata)
     {
       case 0:
         if (cellvalue[0] != 0.0)
-    result += (Math.round(cellvalue[0]*10)/10) + '<a href="{{ request.prefix }}/data/input/manufacturingorder/?operation__name='+
-                                                        admin_escape(rowdata['operation']) +
-                                                         '&amp;startdate__gte=' + options['colModel']['startdate'] +
-                                                               '&amp;startdate__lt=' + options['colModel']['enddate'] +
-                                                         '&amp;status=proposed">&nbsp;<span class="context cross fa fa-caret-right"></span></a><br>';
-		    else
-		      result += '0.0<br>';
+          result += grid.formatNumber(cellvalue[0]) +
+            '<a href="{{ request.prefix }}/data/input/manufacturingorder/?noautofilter' +
+            '&amp;operation__name=' + admin_escape(rowdata['operation']) +
+            '&amp;startdate__gte=' + options['colModel']['startdate'] +
+            '&amp;startdate__lt=' + options['colModel']['enddate'] +
+            '&amp;status=proposed">&nbsp;<span class="context cross fa fa-caret-right"></span></a><br>';
+        else
+          result += '0<br>';
         break;
       case 1:
-			  if (cellvalue[1] != 0.0)
-    result += (Math.round(cellvalue[1]*10)/10) +  '<a href="{{ request.prefix }}/data/input/manufacturingorder/?operation__name='+
-                                                                  admin_escape(rowdata['operation']) +
-                                                            '&startdate__gte=' + options['colModel']['startdate'] +
-                                                                  '&amp;startdate__lt=' + options['colModel']['enddate'] +
-                                                                  '">&nbsp;<span class="context cross fa fa-caret-right"></span></a><br>';
-			  else
-			    result += '0.0<br>';
-			  break;
-	    case 2:
-			  if (cellvalue[2] != 0.0)
-    result += (Math.round(cellvalue[2]*10)/10) +  '<a href="{{ request.prefix }}/data/input/manufacturingorder/?operation__name='+
-                                                                  admin_escape(rowdata['operation']) +
-                                                            '&enddate__gt=' + options['colModel']['startdate'] +
-                                                                  '&amp;enddate__lte=' + options['colModel']['enddate'] +
-                                                            '&amp;status=proposed">&nbsp;<span class="context cross fa fa-caret-right"></span></a><br>';
-			  else
-			    result += '0.0<br>';
-			  break;
+        if (cellvalue[1] != 0.0)
+          result += grid.formatNumber(cellvalue[1]) +
+            '<a href="{{ request.prefix }}/data/input/manufacturingorder/?noautofilter' +
+            '&amp;operation__name='+ admin_escape(rowdata['operation']) +
+            '&amp;startdate__gte=' + options['colModel']['startdate'] +
+            '&amp;startdate__lt=' + options['colModel']['enddate'] +
+            '">&nbsp;<span class="context cross fa fa-caret-right"></span></a><br>';
+        else
+          result += '0<br>';
+        break;
+      case 2:
+        if (cellvalue[2] != 0.0)
+          result += grid.formatNumber(cellvalue[2]) +
+            '<a href="{{ request.prefix }}/data/input/manufacturingorder/?noautofilter' +
+            '&amp;operation__name=' + admin_escape(rowdata['operation']) +
+            '&amp;enddate__gte=' + options['colModel']['startdate'] +
+            '&amp;enddate__lt=' + options['colModel']['enddate'] +
+            '&amp;status=proposed">&nbsp;<span class="context cross fa fa-caret-right"></span></a><br>';
+        else
+          result += '0<br>';
+        break;
       case 3:
-			  if (cellvalue[3] != 0.0)
-    result += (Math.round(cellvalue[3]*10)/10) +  '<a href="{{ request.prefix }}/data/input/manufacturingorder/?operation__name='+
-                                                                  admin_escape(rowdata['operation']) +
-                                                            '&enddate__gt=' + options['colModel']['startdate'] +
-                                                                  '&amp;enddate__lte=' + options['colModel']['enddate'] +
-                                                                  '">&nbsp;<span class="context cross fa fa-caret-right"></span></a><br>';
-			  else
-			    result += '0.0<br>';
+        if (cellvalue[3] != 0.0)
+          result += grid.formatNumber(cellvalue[3]) +
+            '<a href="{{ request.prefix }}/data/input/manufacturingorder/?noautofilter' +
+            '&amp;operation__name=' + admin_escape(rowdata['operation']) +
+            '&amp;enddate__gte=' + options['colModel']['startdate'] +
+            '&amp;enddate__lt=' + options['colModel']['enddate'] +
+            '">&nbsp;<span class="context cross fa fa-caret-right"></span></a><br>';
+        else
+          result += '0<br>';
         break;
       case 4:
-			  if (cellvalue[4] != 0.0)
-    result += (Math.round(cellvalue[4]*10)/10) +  '<a href="{{ request.prefix }}/data/input/manufacturingorder/?operation__name='+
-                                                                  admin_escape(rowdata['operation']) +
-                                                            '&startdate__lte=' + options['colModel']['enddate'] +
-                                                                  '&amp;enddate__gt=' + options['colModel']['startdate'] +
-                                                                  '&amp;status=proposed">&nbsp;<span class="context cross fa fa-caret-right"></span></a><br>';
-			  else
-			    result += '0.0<br>';
+        if (cellvalue[4] != 0.0)
+          result += grid.formatNumber(cellvalue[4]) +
+            '<a href="{{ request.prefix }}/data/input/manufacturingorder/?noautofilter' +
+            '&amp;operation__name=' + admin_escape(rowdata['operation']) +
+            '&amp;startdate__lte=' + options['colModel']['enddate'] +
+            '&amp;enddate__gt=' + options['colModel']['startdate'] +
+            '&amp;status=proposed">&nbsp;<span class="context cross fa fa-caret-right"></span></a><br>';
+        else
+          result += '0<br>';
         break;
       case 5:
-			  if (cellvalue[5] != 0.0)
-    result += (Math.round(cellvalue[5]*10)/10) +  '<a href="{{ request.prefix }}/data/input/manufacturingorder/?operation__name='+
-                                                                  admin_escape(rowdata['operation']) +
-                                                            '&startdate__lte=' + options['colModel']['enddate'] +
-                                                                  '&amp;enddate__gt=' + options['colModel']['startdate'] +
-                                                                  '">&nbsp;<span class="context cross fa fa-caret-right"></span></a><br>';
-			  else
-			    result += '0.0<br>';
+        if (cellvalue[5] != 0.0)
+          result += grid.formatNumber(cellvalue[5]) +
+            '<a href="{{ request.prefix }}/data/input/manufacturingorder/?noautofilter&amp;' +
+            'operation__name=' + admin_escape(rowdata['operation']) +
+            '&amp;startdate__lte=' + options['colModel']['enddate'] +
+            '&amp;enddate__gt=' + options['colModel']['startdate'] +
+            '">&nbsp;<span class="context cross fa fa-caret-right"></span></a><br>';
+        else
+          result += '0<br>';
         break;
-        
       default:
-        result += cellvalue[cross_idx[i]] + '<br>';
+        result += grid.formatNumber(cellvalue[cross_idx[i]]) + '<br>';
     }
   return result;
 };

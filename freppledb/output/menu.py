@@ -1,22 +1,37 @@
-# Copyright (C) 2013 by frePPLe bvba
+# Copyright (C) 2013 by frePPLe bv
 #
-# This library is free software; you can redistribute it and/or modify it
-# under the terms of the GNU Affero General Public License as published
-# by the Free Software Foundation; either version 3 of the License, or
-# (at your option) any later version.
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject to
+# the following conditions:
 #
-# This library is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero
-# General Public License for more details.
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
 #
-# You should have received a copy of the GNU Affero General Public
-# License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+# LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+# WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 
 from freppledb.menu import menu
 from freppledb.input.models import OperationPlanMaterial, OperationPlanResource
-from freppledb.input.models import Demand, Operation, Resource, DistributionOrder, PurchaseOrder
+from freppledb.input.models import (
+    Item,
+    Location,
+    Customer,
+    OperationPlan,
+    Operation,
+    Resource,
+    DistributionOrder,
+    PurchaseOrder,
+)
 from freppledb.input.models import ManufacturingOrder, ItemDistribution, ItemSupplier
 import freppledb.output.views.buffer
 import freppledb.output.views.demand
@@ -29,74 +44,104 @@ import freppledb.output.views.kpi
 
 # Adding reports. We use an index value to keep the same order of the entries in all languages.
 menu.addItem(
-  "sales", "demand report", url="/demand/",
-  report=freppledb.output.views.demand.OverviewReport, index=200,
-  dependencies=[Demand]
-  )
+    "sales",
+    "demand report",
+    url="/demand/",
+    report=freppledb.output.views.demand.OverviewReport,
+    index=200,
+    dependencies=[Item, Location, Customer, OperationPlan],
+)
 menu.addItem(
-  "sales", "problem report", url="/problem/?entity=demand",
-  report=freppledb.output.views.problem.Report, index=400,
-  dependencies=[Demand]
-  )
+    "sales",
+    "problem report",
+    url="/problem/?entity__in=demand,forecast",
+    report=freppledb.output.views.problem.Report,
+    index=400,
+    dependencies=[Item, Location, Customer, OperationPlan],
+)
 menu.addItem(
-  "sales", "constraint report", url="/constraint/",
-  report=freppledb.output.views.constraint.BaseReport, index=500,
-  dependencies=[Demand]
-  )
+    "sales",
+    "constraint report",
+    url="/constraint/",
+    report=freppledb.output.views.constraint.BaseReport,
+    index=500,
+    dependencies=[Item, Location, Customer, OperationPlan],
+)
 menu.addItem(
-  "admin", "kpi report", url="/kpi/",
-  report=freppledb.output.views.kpi.Report, index=200
-  )
+    "admin",
+    "kpi report",
+    url="/kpi/",
+    report=freppledb.output.views.kpi.Report,
+    index=200,
+)
 menu.addItem(
-  "inventory", "distribution order summary", url="/distribution/",
-  report=freppledb.output.views.operation.DistributionReport, index=90,
-  dependencies=[DistributionOrder, ItemDistribution]
-  )
+    "inventory",
+    "distribution order summary",
+    url="/distribution/",
+    report=freppledb.output.views.operation.DistributionReport,
+    index=90,
+    dependencies=[DistributionOrder, ItemDistribution],
+)
 menu.addItem(
-  "inventory", "inventory report", url="/buffer/",
-  report=freppledb.output.views.buffer.OverviewReport, index=100,
-  dependencies=[OperationPlanMaterial]
-  )
+    "inventory",
+    "inventory report",
+    url="/buffer/",
+    report=freppledb.output.views.buffer.OverviewReport,
+    index=100,
+    dependencies=[OperationPlanMaterial],
+)
 menu.addItem(
-  "inventory", "inventory detail report", url="/flowplan/",
-  report=freppledb.output.views.buffer.DetailReport, index=200,
-  dependencies=[OperationPlanMaterial]
-  )
+    "inventory",
+    "problem report",
+    url="/problem/?entity=material",
+    report=freppledb.output.views.problem.Report,
+    index=300,
+    dependencies=[OperationPlanMaterial],
+)
 menu.addItem(
-  "inventory", "problem report", url="/problem/?entity=material",
-  report=freppledb.output.views.problem.Report, index=300,
-  dependencies=[OperationPlanMaterial]
-  )
+    "capacity",
+    "resource report",
+    url="/resource/",
+    report=freppledb.output.views.resource.OverviewReport,
+    index=100,
+    dependencies=[OperationPlanResource],
+)
 menu.addItem(
-  "capacity", "resource report", url="/resource/",
-  report=freppledb.output.views.resource.OverviewReport, index=100,
-  dependencies=[OperationPlanResource]
-  )
+    "capacity",
+    "problem report",
+    url="/problem/?entity=capacity",
+    report=freppledb.output.views.problem.Report,
+    index=300,
+    dependencies=[Resource],
+)
 menu.addItem(
-  "capacity", "resource detail report", url="/loadplan/",
-  report=freppledb.output.views.resource.DetailReport, index=200,
-  dependencies=[OperationPlanResource])
+    "purchasing",
+    "purchase order summary",
+    url="/purchase/",
+    report=freppledb.output.views.operation.PurchaseReport,
+    index=200,
+    dependencies=[PurchaseOrder, ItemSupplier],
+)
 menu.addItem(
-  "capacity", "problem report", url="/problem/?entity=capacity",
-  report=freppledb.output.views.problem.Report, index=300,
-  dependencies=[Resource]
-  )
+    "manufacturing",
+    "manufacturing order summary",
+    url="/operation/",
+    report=freppledb.output.views.operation.OverviewReport,
+    index=110,
+    dependencies=[ManufacturingOrder, Operation],
+)
 menu.addItem(
-  "purchasing", "purchase order summary", url="/purchase/",
-  report=freppledb.output.views.operation.PurchaseReport, index=200,
-  dependencies=[PurchaseOrder, ItemSupplier]
-  )
+    "manufacturing",
+    "problem report",
+    url="/problem/?entity=operation",
+    report=freppledb.output.views.problem.Report,
+    index=200,
+    dependencies=[Operation],
+)
 menu.addItem(
-  "manufacturing", "manufacturing order summary", url="/operation/",
-  report=freppledb.output.views.operation.OverviewReport, index=110,
-  dependencies=[ManufacturingOrder, Operation]
-  )
-menu.addItem(
-  "manufacturing", "problem report", url="/problem/?entity=operation",
-  report=freppledb.output.views.problem.Report, index=200,
-  dependencies=[Operation]
-  )
-menu.addItem(
-  "admin", "problem report", url="/problem/?name=invalid%20data",
-  report=freppledb.output.views.problem.Report, index=400,
-  )
+    "admin",
+    "problem report",
+    url="/problem/?name=invalid%20data",
+    report=freppledb.output.views.problem.Report,
+    index=400,
+)

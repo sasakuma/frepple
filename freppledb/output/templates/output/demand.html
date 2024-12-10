@@ -1,7 +1,17 @@
 {% extends "admin/base_site_gridpivot.html" %}
 {% load i18n %}
 
-{% block tools %}{% if args.0 %}{% tabs "input.item" %}{% endif %}{{block.super}}{% endblock %}
+{% block tools %}{% if args.0 %}
+{% include "common/snippet_follow.html" %}
+{% endif %}
+{{block.super}}
+{% endblock %}
+
+{% block tabs %}{% if args.0 %}
+{% tabs "input.item" %}
+{% endif %}
+{{block.super}}
+{% endblock %}
 
 {% block before_table %}{% if args.0 %}
 <div id="graph" style="clear: both; height: 400px; padding: 10px; "></div>
@@ -11,15 +21,16 @@
 {% if args.0 %}$(function(){
   // Resize top graph
   var h = $(window).height();
-  $("#graph").width($(window).width()-60).height(h>800 || h<480 ? 400 : h-420);
+  $("#graph").width($(window).width()-60).height(h>800 || h<550 ? 360 : h-450);
 });{% endif %}
 
 {% if args.0 or mode == "graph" %}
 function drawGraphs(jsondata)
 {
+  $('#curerror').html("");
   {% if args.0 %}var margin = {top: 0, right: 100, bottom: 30, left: 50};
   {% else %}var margin = {top: 0, right: 0, bottom: 0, left: 50};
-  {% endif %}var width = $({% if args.0 %}"#graph"{% else %}"#grid_graph"{% endif %}).width() - margin.left - margin.right;
+  {% endif %}var width = Math.max($({% if args.0 %}"#graph"{% else %}"#grid_graph"{% endif %}).width() - margin.left - margin.right, 0);
   var height = {% if args.0 %}$("#graph").height(){% else %}80{% endif %} - margin.top - margin.bottom;
 
   // Lookup table of displayed columns
@@ -37,10 +48,10 @@ function drawGraphs(jsondata)
   }
   var x = d3.scale.ordinal()
     .domain(domain_x)
-    .rangeRoundBands([0, width], .1);
+    .rangeRoundBands([0, width], 0);
   var x_width = x.rangeBand();
   {% if mode == "graph" and not args.0 %}graph.header(margin.left, x);{% endif %}
-  
+
   // Define Y-axis
   var y = d3.scale.linear().rangeRound([height, 0]);
 
@@ -69,7 +80,8 @@ function drawGraphs(jsondata)
         'bucket': bckt,
         'demand': tmp[0],
         'supply': tmp[1],
-        'backlog': tmp[2]
+        'backlog': tmp[2],
+        'reasons': tmp[3]
         });
       if (tmp[2] < min_y && 2 in fields)
         min_y = tmp[2];
@@ -102,7 +114,7 @@ function drawGraphs(jsondata)
             .attr("height", y_zero - my_y)
             .attr("x", x_width/2)
             .attr("y", my_y)
-            .style("fill","#2B95EC");
+            .style("fill","#F6BD0F");
         }
         if (d['supply'] > 0 && 1 in fields)
         {
@@ -111,7 +123,7 @@ function drawGraphs(jsondata)
             .attr("width", x_width/2)
             .attr("height", y_zero - my_y)
             .attr("y", my_y)
-            .style("fill","#F6BD0F");
+            .style("fill","#2B95EC");
         }
         // Invisible rectangle for the tooltip
       	bucket.append("rect")
@@ -119,34 +131,41 @@ function drawGraphs(jsondata)
 	      .attr("width", x_width)
 	      .attr("fill-opacity", 0)
 	      .on("click", function(d) {
-	          if (d3.event.defaultPrevented || d['demand'] == 0)
+	          if (d3.event.defaultPrevented || (d['demand'] == 0 && d['backlog'] == 0))
 	            return;
 	          d3.select("#tooltip").style('display', 'none');
-	
+
 	          window.location = "{{ request.prefix }}"
-	            +"/data/input/deliveryorder/item/"
-	            +admin_escape(d['item'])
-	            +"/?o=5a&enddate__gte="+timebuckets[d['bucket']]['startdate']
-	            +"&enddate__lt="+timebuckets[d['bucket']]['enddate'];
-	
+	            +"/data/input/demand"
+	            +"/?noautofilter&amp;deliverydate__gte=" + timebuckets[d['bucket']]['startdate']
+	            +"&amp;due__lt=" + timebuckets[d['bucket']]['enddate']
+	            +"&amp;item__name=" + admin_escape(d['item'])
+	            +"&amp;status__in=open,quote";
+
 	          var coord = d3.mouse(document.body);
 	          d3.event.stopPropagation();
 	        })
-	      .on("mouseenter", function(d) {
-	        graph.showTooltip(
-	          '<div class="panel-heading" style="text-align:center; font-weight:bold">'
-	          + timebuckets[d['bucket']]['name'] + '</div>'
-	          + '<table><tr><td>{{_('demand')|capfirst}}</td><td style="text-align:center">'
-	          + (Math.round(d['demand']*10)/10)
-	          + '</td></tr><tr><td>{{_('supply')|capfirst}}</td><td style="text-align:center">'
-	          + (Math.round(d['supply']*10)/10)
-	          + '</td></tr><tr><td>{{_('backlog')|capfirst}}</td><td style="text-align:center">'
-	          + (Math.round((d['backlog'])*10)/10)
-	          + '</td></tr></table>'
-	          );
-	        })
+         .on("mouseenter", function(d) {
+           var txt = '<div style="text-align:center; font-weight:bold">'
+             + timebuckets[d['bucket']]['name'] + '</div>'
+             + '<table><tr><td>{{_('sales orders')|capfirst}}</td><td style="text-align:center">'
+             + grid.formatNumber(d['demand'])
+             + '</td></tr><tr><td>{{_('supply')|capfirst}}</td><td style="text-align:center">'
+             + grid.formatNumber(d['supply'])
+             + '</td></tr><tr><td>{{_('backlog')|capfirst}}</td><td style="text-align:center">'
+             + grid.formatNumber(d['backlog'])
+             + '</td></tr></table>';
+           if (d['reasons']) {
+             txt += '<div style="text-align:center; font-weight:bold">'
+               + '{{_('constraints')|capfirst}}</div><table style="white-space:nowrap">';
+             for (var r of d['reasons'])
+               txt += '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>';
+             txt += '</table>';
+           }
+           graph.showTooltip(txt);
+           })
 	      .on("mouseleave", graph.hideTooltip)
-	      .on("mousemove", graph.moveTooltip);	      
+	      .on("mousemove", graph.moveTooltip);
       });
 
     // Create D3 line
@@ -157,14 +176,15 @@ function drawGraphs(jsondata)
         .y(function(d) { return y(d['backlog']); });
       svg.append("svg:path")
         .attr('class', 'graphline')
-        .attr("stroke","#8BBA00")
+        .attr("stroke","#000000")
         .attr("d", line(data));
     }
 
     // Display Y-Axis
     var yAxis = d3.svg.axis()
       .scale(y)
-      .orient("left");
+      .orient("left")
+      .tickFormat(d3.format("s"));
     {% if not args.0 %}
     svg.append("g")
       .attr("class", "miniaxis")
@@ -191,9 +211,9 @@ function drawGraphs(jsondata)
     // Display legend
     var legend = svg.append("g");
     var codes = [
-      [1, "{{_('demand')|capfirst}}", "#2B95EC"],
-      [2, "{{_('supply')|capfirst}}", "#F6BD0F"],
-      [3, "{{_('backlog')|capfirst}}", "#8BBA00"]
+      [1, "{{_('sales orders')|capfirst}}", "#F6BD0F"],
+      [2, "{{_('supply')|capfirst}}", "#2B95EC"],
+      [3, "{{_('backlog')|capfirst}}", "#000000"]
       ];
     var visible = 0;
     for (var i in codes)
@@ -227,26 +247,26 @@ function crosses (cellvalue, options, rowdata)
     {
       case 0:
         if (cellvalue[cross_idx[i]] != 0.0)
-          result += cellvalue[cross_idx[i]] + '<a href="{{request.prefix}}/data/input/deliveryorder/item/' +
-            admin_escape(rowdata['item']) +
-            '/?o=5a&amp;demand__due__gte=' + options['colModel']['startdate'] +
-            '&amp;demand__due__lt=' + options['colModel']['enddate'] +
-            '">&nbsp;<span class="context cross fa fa-caret-right"></span></a><br>';
+          result += grid.formatNumber(cellvalue[cross_idx[i]]) + '<a href="{{request.prefix}}/data/input/demand/?noautofilter' +
+            '&amp;due__gte=' + options['colModel']['startdate'] +
+            '&amp;due__lt=' + options['colModel']['enddate'] +
+            '&amp;item__name__ico=' + admin_escape(rowdata['item']) +
+            '&amp;status__in=' + admin_escape('quote,open') + '">&nbsp;<span class="context cross fa fa-caret-right"></span></a><br>';
         else
-          result += '0.0<br>';
+          result += '0<br>';
         break;
-      case 1:
+      case 2:
         if (cellvalue[cross_idx[i]] != 0.0)
-          result += cellvalue[cross_idx[i]] + '<a href="{{request.prefix}}/data/input/deliveryorder/item/' +
-            admin_escape(rowdata['item']) +
-            '/?o=5a&amp;enddate__gte=' + options['colModel']['startdate'] +
-            '&amp;enddate__lt=' + options['colModel']['enddate'] +
-            '">&nbsp;<span class="context cross fa fa-caret-right"></span></a><br>';
+          result += grid.formatNumber(cellvalue[cross_idx[i]]) + '<a href="{{request.prefix}}/data/input/demand/?noautofilter' +
+            '&amp;deliverydate__gte=' + options['colModel']['enddate'] +
+            '&amp;due__lt=' + options['colModel']['enddate'] +
+            '&amp;item__name__ico=' + admin_escape(rowdata['item']) +
+            '&amp;status__in=' + admin_escape('quote,open') + '">&nbsp;<span class="context cross fa fa-caret-right"></span></a><br>';
         else
-          result += '0.0<br>';
+          result += '0<br>';
         break;
       default:
-        result += cellvalue[cross_idx[i]] + '<br>';
+        result += grid.formatNumber(cellvalue[cross_idx[i]]) + '<br>';
     }
   return result;
 };

@@ -1,53 +1,54 @@
-/* Copyright (C) 2015 by frePPLe bvba
+/* Copyright (C) 2015 by frePPLe bv
  *
- * This library is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published
- * by the Free Software Foundation; either version 3 of the License, or
- * (at your option) any later version.
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
  *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero
- * General Public License for more details.
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
  *
- * You should have received a copy of the GNU Affero General Public
- * License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+ * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE
  */
+
+const sass = require('sass');
 
 function themeconfig(themefolder, themename) {
   // Auxilary function to generate the task configuration for a single theme.
   var cfg = {
     options: {
-      paths: [
+      implementation: sass,
+      includePaths: [
         themefolder + '/static/css/' + themename, // frePPLe theme folder
-        'freppledb/common/static/css', // frePPLe folder
-        'node_modules/bootstrap/less' // bootstrap folder
-        ],
-      strictMath: true,
-      sourceMap: true,
-      compress: true,
-      relativeUrls: true,
-      plugins: [
-        new(require('less-plugin-autoprefix'))({
-          browsers: ["last 2 versions"]
-        })
-      ]
+        'freppledb/common/static/css'//, // frePPLe folder
+      ],
+      outputStyle: 'compressed'
     },
     files: {}
   }
   cfg.files[themefolder + '/static/css/' + themename + '/bootstrap.min.css'] = [
-    'freppledb/common/static/css/frepple.less', // Generic frePPLe styles
-    themefolder + '/static/css/' + themename + '/frepple.less' // Theme specific styles
-    ]
+    'freppledb/common/static/css/frepple.scss', // Generic frePPLe styles
+    themefolder + '/static/css/' + themename + '/frepple.scss' // Theme specific styles
+  ]
   return cfg;
 }
 
 // Grunt configuration
 module.exports = function (grunt) {
+
   grunt.initConfig({
     pkg: grunt.file.readJSON('package.json'),
-    // Less compilation
-    less: {
+    // SASS compilation
+    sass: {
       odoo: themeconfig('freppledb/common', 'odoo'),
       grass: themeconfig('freppledb/common', 'grass'),
       earth: themeconfig('freppledb/common', 'earth'),
@@ -58,10 +59,10 @@ module.exports = function (grunt) {
       orange: themeconfig('freppledb/common', 'orange'),
       openbravo: themeconfig('freppledb/common', 'openbravo'),
     },
-    // When any .less file changes we automatically run the "less"-task.
+    // When any .scss file changes we automatically run the "sass"-task.
     watch: {
-      files: ["**/*.less"],
-      tasks: ["less"]
+      files: ["**/*.scss"],
+      tasks: ["sass"]
     },
 
     // Extract translations
@@ -73,20 +74,12 @@ module.exports = function (grunt) {
         files: {
           'freppledb/common/static/common/po/template.pot': [
             'freppledb/input/static/operationplandetail/*.html',
-            'freppledb/input/static/operationplandetail/src/*.js'
-            ]
+            'freppledb/input/static/operationplandetail/src/*.js',
+            'freppledb/forecast/static/forecast/*.html',
+            'freppledb/forecast/static/forecast/src/*.js'
+          ]
         }
       },
-    },
-
-    exec: {
-      extractDjangoStrings: {
-        command: 'make international'
-        },
-      merge_pot_template: {
-        command: 'find . -type f -name "*.po" -exec msgmerge -U template.pot {} \\;',
-        cwd: 'freppledb/common/static/common/po'
-        }
     },
 
     // Compile translations
@@ -104,41 +97,59 @@ module.exports = function (grunt) {
     concat: {
       common: {
         src: [
-              'freppledb/common/static/common/src/module.js',
-              'freppledb/common/static/common/src/webfactory.js',
-              'freppledb/common/static/common/src/preferences.js',
-              'freppledb/common/static/common/src/chat.js'
-              ],
+          'freppledb/common/static/common/src/module.js',
+          'freppledb/common/static/common/src/webfactory.js',
+          'freppledb/common/static/common/src/preferences.js'
+        ],
         dest: 'freppledb/common/static/js/frepple-common.js'
       },
       input: {
         src: [
-              'freppledb/input/static/input/src/module.js',
-              'freppledb/input/static/input/src/buffer.js',
-              'freppledb/input/static/input/src/demand.js',
-              'freppledb/input/static/input/src/customer.js',
-              'freppledb/input/static/input/src/item.js',
-              'freppledb/input/static/input/src/location.js',
-              'freppledb/input/static/input/src/operation.js',
-              'freppledb/input/static/input/src/operationplan.js',
-              'freppledb/input/static/input/src/resource.js',
-              'freppledb/input/static/input/src/model.js',
-              ],
+          'freppledb/input/static/input/src/module.js',
+          'freppledb/input/static/input/src/buffer.js',
+          'freppledb/input/static/input/src/demand.js',
+          'freppledb/input/static/input/src/customer.js',
+          'freppledb/input/static/input/src/item.js',
+          'freppledb/input/static/input/src/location.js',
+          'freppledb/input/static/input/src/operation.js',
+          'freppledb/input/static/input/src/operationplan.js',
+          'freppledb/input/static/input/src/resource.js',
+          'freppledb/input/static/input/src/model.js',
+        ],
         dest: 'freppledb/input/static/js/frepple-input.js'
       },
       operationplandetail: {
         src: [
-              'freppledb/input/static/operationplandetail/src/module.js',
-              'freppledb/input/static/operationplandetail/src/operationplandetailCtrl.js',
-              'freppledb/input/static/operationplandetail/src/problemspanelDrv.js',
-              'freppledb/input/static/operationplandetail/src/resourcespanelDrv.js',
-              'freppledb/input/static/operationplandetail/src/bufferspanelDrv.js',
-              'freppledb/input/static/operationplandetail/src/demandpeggingpanelDrv.js',
-              'freppledb/input/static/operationplandetail/src/operationplanpanelDrv.js',
-              'freppledb/input/static/operationplandetail/src/supplyinformationDrv.js',
-              'freppledb/input/static/operationplandetail/src/networkstatusDrv.js'
-              ],
+          'freppledb/input/static/operationplandetail/src/calendar.js',
+          'freppledb/input/static/operationplandetail/src/module.js',
+          'freppledb/input/static/operationplandetail/src/operationplandetailCtrl.js',
+          'freppledb/input/static/operationplandetail/src/problemspanelDrv.js',
+          'freppledb/input/static/operationplandetail/src/resourcespanelDrv.js',
+          'freppledb/input/static/operationplandetail/src/bufferspanelDrv.js',
+          'freppledb/input/static/operationplandetail/src/demandpeggingpanelDrv.js',
+          'freppledb/input/static/operationplandetail/src/operationplanpanelDrv.js',
+          'freppledb/input/static/operationplandetail/src/supplyinformationDrv.js',
+          'freppledb/input/static/operationplandetail/src/downstreamoperationplansDrv.js',
+          'freppledb/input/static/operationplandetail/src/upstreamoperationplansDrv.js',
+          'freppledb/input/static/operationplandetail/src/kanbanDrv.js',
+          'freppledb/input/static/operationplandetail/src/ganttDrv.js',
+          'freppledb/input/static/operationplandetail/src/d3service.js',
+          'freppledb/input/static/operationplandetail/src/inventorydataDrv.js',
+          'freppledb/input/static/operationplandetail/src/inventorygraphDrv.js',
+        ],
         dest: 'freppledb/input/static/js/frepple-operationplandetail.js'
+      },
+      forecast: {
+        src: [
+            'freppledb/forecast/static/forecast/src/module.js',
+            'freppledb/forecast/static/forecast/src/customerstable.js',
+            'freppledb/forecast/static/forecast/src/itemstable.js',
+            'freppledb/forecast/static/forecast/src/locationstable.js',
+            'freppledb/forecast/static/forecast/src/forecastgridDrv.js',
+            'freppledb/forecast/static/forecast/src/displayForecastGraph.js',
+            'freppledb/forecast/static/forecast/src/forecast.js'
+            ],
+          dest: 'freppledb/forecast/static/js/frepple-forecast.js'
       }
     },
 
@@ -146,18 +157,26 @@ module.exports = function (grunt) {
     uglify: {
       options: {
         sourceMap: true,
-        banner: '/* frePPLe <%= pkg.version %> <%= grunt.template.today("yyyy-mm-dd") %>\n' +
-          'Copyright (C) 2010-2017 by frePPLe bvba\n\n' +
-          'This library is free software; you can redistribute it and/or modify it\n' +
-          'under the terms of the GNU Affero General Public License as published\n' +
-          'by the Free Software Foundation; either version 3 of the License, or\n' +
-          '(at your option) any later version.\n\n' +
-          'This library is distributed in the hope that it will be useful,\n' +
-          'but WITHOUT ANY WARRANTY; without even the implied warranty of\n' +
-          'MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero\n' +
-          'General Public License for more details.\n\n' +
-          'You should have received a copy of the GNU Affero General Public\n' +
-          'License along with this program.  If not, see <http://www.gnu.org/licenses/>.\n' +
+        banner: '/* frePPLe <%= pkg.version %>\n' +
+          'Copyright (C) 2010-2019 by frePPLe bv\n\n' +
+          'Permission is hereby granted, free of charge, to any person obtaining\n' +
+          'a copy of this software and associated documentation files(the\n' +
+          '"Software"), to deal in the Software without restriction, including\n' +
+          'without limitation the rights to use, copy, modify, merge, publish,\n' +
+          'distribute, sublicense, and/ or sell copies of the Software, and to\n' +
+          'permit persons to whom the Software is furnished to do so, subject to\n' +
+          'the following conditions:\n' +
+          '\n' +
+          'The above copyright notice and this permission notice shall be\n' +
+          'included in all copies or substantial portions of the Software.\n' +
+          '\n' +
+          'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,\n' +
+          'EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF\n' +
+          'MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND\n' +
+          'NONINFRINGEMENT.IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE\n' +
+          'LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\n' +
+          'OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION\n' +
+          'WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\n' +
           '*/\n'
       },
       js: {
@@ -175,6 +194,10 @@ module.exports = function (grunt) {
       operationplandetail: {
         src: ['freppledb/input/static/js/frepple-operationplandetail.js'],
         dest: 'freppledb/input/static/js/frepple-operationplandetail.min.js'
+      },
+      forecast: {
+        src: ['freppledb/forecast/static/js/frepple-forecast.js'],
+        dest: 'freppledb/forecast/static/js/frepple-forecast.min.js'
       }
     },
 
@@ -182,30 +205,22 @@ module.exports = function (grunt) {
     clean: [
       'freppledb/common/static/js/frepple-common.js',
       'freppledb/input/static/js/frepple-input.js',
-      'freppledb/input/static/js/frepple-operationplandetail.js'
-      ]
+      'freppledb/input/static/js/frepple-operationplandetail.js',
+      'freppledb/forecast/static/js/frepple-forecast.js'
+    ]
   });
 
   // Load tasks
-  grunt.loadNpmTasks('grunt-contrib-less');
+  grunt.loadNpmTasks('grunt-sass');
   grunt.loadNpmTasks('grunt-contrib-watch');
   grunt.loadNpmTasks('grunt-angular-gettext');
   grunt.loadNpmTasks('grunt-contrib-concat');
-  grunt.loadNpmTasks('grunt-contrib-uglify');
+  grunt.loadNpmTasks('grunt-contrib-uglify-es');
   grunt.loadNpmTasks('grunt-contrib-clean');
   grunt.loadNpmTasks('grunt-exec');
 
-  // Tanslations process
-  // 1) Extract django strings: make international
-  // 2) Extract angular strings: grunt nggettext_extract
-  // 3) For the angular translations: Merge .pot file into the .po file in poedit "update from POT file"
-  // 4) Translate all strings in the angular and django .po files. The real work!
-  // 5) Process the angular .po files into a javascript file: grunt nggettext_compile
-  grunt.registerTask('international_1', ['exec:extractDjangoStrings', 'nggettext_extract', 'exec:merge_pot_template']);
-  grunt.registerTask('international_2', ['nggettext_compile']);
-
   // Register our tasks
   grunt.registerTask('minify', ['concat', 'uglify', 'clean']);
-  grunt.registerTask('default', ['less', 'concat', 'uglify', 'clean']);
+  grunt.registerTask('default', ['sass', 'concat', 'uglify', 'clean']);
 
 };

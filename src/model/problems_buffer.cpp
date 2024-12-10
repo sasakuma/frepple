@@ -1,50 +1,49 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2015 by frePPLe bvba                                 *
+ * Copyright (C) 2007-2015 by frePPLe bv                                   *
  *                                                                         *
- * This library is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU Affero General Public License as published   *
- * by the Free Software Foundation; either version 3 of the License, or    *
- * (at your option) any later version.                                     *
+ * Permission is hereby granted, free of charge, to any person obtaining   *
+ * a copy of this software and associated documentation files (the         *
+ * "Software"), to deal in the Software without restriction, including     *
+ * without limitation the rights to use, copy, modify, merge, publish,     *
+ * distribute, sublicense, and/or sell copies of the Software, and to      *
+ * permit persons to whom the Software is furnished to do so, subject to   *
+ * the following conditions:                                               *
  *                                                                         *
- * This library is distributed in the hope that it will be useful,         *
- * but WITHOUT ANY WARRANTY; without even the implied warranty of          *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the            *
- * GNU Affero General Public License for more details.                     *
+ * The above copyright notice and this permission notice shall be          *
+ * included in all copies or substantial portions of the Software.         *
  *                                                                         *
- * You should have received a copy of the GNU Affero General Public        *
- * License along with this program.                                        *
- * If not, see <http://www.gnu.org/licenses/>.                             *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,         *
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF      *
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND                   *
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE  *
+ * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION  *
+ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION   *
+ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.         *
  *                                                                         *
  ***************************************************************************/
 
 #define FREPPLE_CORE
 #include "frepple/model.h"
 
-namespace frepple
-{
+namespace frepple {
 
-
-void Buffer::updateProblems()
-{
+void Buffer::updateProblems() {
   // Delete existing problems for this buffer
-  Problem::clearProblems(*this, true, false);
+  Problem::clearProblems(*this, false, false);
+  setChanged(false);
 
   // Problem detection disabled on this buffer
   if (!getDetectProblems()) return;
 
   // Loop through the flowplans
-  Date excessProblemStart;
   Date shortageProblemStart;
   bool shortageProblem = false;
-  bool excessProblem = false;
   double curMax(0.0);
   double shortageQty(0.0);
   double curMin(0.0);
-  double excessQty(0.0);
   for (flowplanlist::const_iterator iter = flowplans.begin();
-      iter != flowplans.end(); )
-  {
+       iter != flowplans.end();) {
     // Process changes in the maximum or minimum targets
     if (iter->getEventType() == 4)
       curMax = iter->getMax();
@@ -53,91 +52,41 @@ void Buffer::updateProblems()
 
     // Only consider the last flowplan for a certain date
     const TimeLine<FlowPlan>::Event *f = &*(iter++);
-    if (iter!=flowplans.end() && iter->getDate()==f->getDate()) continue;
+    if (iter != flowplans.end() && iter->getDate() == f->getDate()) continue;
 
     // Check against minimum target
     double delta = f->getOnhand() - curMin;
-    if (delta < -ROUNDING_ERROR)
-    {
-      if (!shortageProblem)
-      {
+    if (delta < -ROUNDING_ERROR) {
+      if (!shortageProblem) {
         // Start of a problem
         shortageProblemStart = f->getDate();
         shortageQty = delta;
         shortageProblem = true;
-      }
-      else if (delta < shortageQty)
+      } else if (delta < shortageQty)
         // New shortage qty
         shortageQty = delta;
-    }
-    else
-    {
-      if (shortageProblem)
-      {
+    } else {
+      if (shortageProblem) {
         // New problem now ends
         if (f->getDate() != shortageProblemStart)
-          new ProblemMaterialShortage
-          (this, shortageProblemStart, f->getDate(), -shortageQty);
+          new ProblemMaterialShortage(this, shortageProblemStart, f->getDate(),
+                                      -shortageQty);
         shortageProblem = false;
-      }
-    }
-
-    // Check against maximum target
-    delta = f->getOnhand() - (curMin<curMax ? curMax : curMin);
-    if (delta > ROUNDING_ERROR)
-    {
-      if (!excessProblem)
-      {
-        // New problem starts here
-        excessProblemStart = f->getDate();
-        excessQty = delta;
-        excessProblem = true;
-      }
-      else if (delta > excessQty)
-        excessQty = delta;
-    }
-    else
-    {
-      if (excessProblem)
-      {
-        // New excess qty
-        // New problem now ends
-        if (f->getDate() != excessProblemStart)
-          new ProblemMaterialExcess
-          (this, excessProblemStart, f->getDate(), excessQty);
-        excessProblem = false;
       }
     }
 
   }  // End of for-loop through the flowplans
 
-  // The excess lasts till the end of the horizon...
-  if (excessProblem)
-    new ProblemMaterialExcess
-    (this, excessProblemStart, Date::infiniteFuture, excessQty);
-
   // The shortage lasts till the end of the horizon...
   if (shortageProblem)
-    new ProblemMaterialShortage
-    (this, shortageProblemStart, Date::infiniteFuture, -shortageQty);
+    new ProblemMaterialShortage(this, shortageProblemStart,
+                                Date::infiniteFuture, -shortageQty);
 }
 
-
-
-string ProblemMaterialExcess::getDescription() const
-{
-  ostringstream ch;
-  ch << "Buffer '" << getBuffer() << "' has material excess of " << qty;
-  return ch.str();
-}
-
-
-string ProblemMaterialShortage::getDescription() const
-{
+string ProblemMaterialShortage::getDescription() const {
   ostringstream ch;
   ch << "Buffer '" << getBuffer() << "' has material shortage of " << qty;
   return ch.str();
 }
 
-
-}
+}  // namespace frepple

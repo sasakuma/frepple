@@ -108,6 +108,7 @@
   <demands>
     <demand name="order 1">
       <quantity>3</quantity>
+      <minshipment>1</minshipment>
       <due>2014-01-01T00:00:00</due>
       <priority>1</priority>
       <item name="end item" />
@@ -122,6 +123,8 @@ frepple.saveplan("output.1.xml")
 print("CREATING UNCONSTRAINED PLAN")
 frepple.solver_mrp(plantype=2, constraints=15, loglevel=2).solve()
 frepple.saveplan("output.2.xml")
+frepple.solver_mrp(plantype=2, constraints=0, loglevel=2).solve()
+frepple.saveplan("output.3.xml")
 ?>
 
 </plan>

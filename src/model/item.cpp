@@ -1,113 +1,125 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2015 by frePPLe bvba                                 *
+ * Copyright (C) 2007-2015 by frePPLe bv                                   *
  *                                                                         *
- * This library is free software; you can redistribute it and/or modify it *
- * under the terms of the GNU Affero General Public License as published   *
- * by the Free Software Foundation; either version 3 of the License, or    *
- * (at your option) any later version.                                     *
+ * Permission is hereby granted, free of charge, to any person obtaining   *
+ * a copy of this software and associated documentation files (the         *
+ * "Software"), to deal in the Software without restriction, including     *
+ * without limitation the rights to use, copy, modify, merge, publish,     *
+ * distribute, sublicense, and/or sell copies of the Software, and to      *
+ * permit persons to whom the Software is furnished to do so, subject to   *
+ * the following conditions:                                               *
  *                                                                         *
- * This library is distributed in the hope that it will be useful,         *
- * but WITHOUT ANY WARRANTY; without even the implied warranty of          *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the            *
- * GNU Affero General Public License for more details.                     *
+ * The above copyright notice and this permission notice shall be          *
+ * included in all copies or substantial portions of the Software.         *
  *                                                                         *
- * You should have received a copy of the GNU Affero General Public        *
- * License along with this program.                                        *
- * If not, see <http://www.gnu.org/licenses/>.                             *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,         *
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF      *
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND                   *
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE  *
+ * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION  *
+ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION   *
+ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.         *
  *                                                                         *
  ***************************************************************************/
 
 #define FREPPLE_CORE
 #include "frepple/model.h"
 
-namespace frepple
-{
+namespace frepple {
 
-template<class Item> Tree<string> utils::HasName<Item>::st;
+template <class Item>
+Tree utils::HasName<Item>::st;
 const MetaCategory* Item::metadata;
-const MetaClass* ItemDefault::metadata;
+const MetaClass *ItemMTO::metadata, *ItemMTS::metadata;
 
-
-int Item::initialize()
-{
-  // Initialize the metadata
-  metadata = MetaCategory::registerCategory<Item>("item", "items", reader, finder);
+int Item::initialize() {
+  metadata =
+      MetaCategory::registerCategory<Item>("item", "items", reader, finder);
   registerFields<Item>(const_cast<MetaCategory*>(metadata));
-
-  // Initialize the Python class
   return FreppleCategory<Item>::initialize();
 }
 
-
-int ItemDefault::initialize()
-{
-  // Initialize the metadata
-  ItemDefault::metadata = MetaClass::registerClass<ItemDefault>("item", "item_default",
-      Object::create<ItemDefault>, true);
-
-  // Initialize the Python class
-  return FreppleClass<ItemDefault,Item>::initialize();
+int ItemMTS::initialize() {
+  ItemMTS::metadata = MetaClass::registerClass<ItemMTS>(
+      "item", "item_mts", Object::create<ItemMTS>, true);
+  return FreppleClass<ItemMTS, Item>::initialize();
 }
 
+int ItemMTO::initialize() {
+  ItemMTO::metadata = MetaClass::registerClass<ItemMTO>(
+      "item", "item_mto", Object::create<ItemMTO>);
+  return FreppleClass<ItemMTO, Item>::initialize();
+}
 
-Item::~Item()
-{
+Item::~Item() {
   // Remove references from the buffers
+  // TODO deleting would be better than leaving buffers with a null item
   bufferIterator bufiter(this);
-  while (Buffer* buf = bufiter.next())
-    buf->setItem(nullptr);
+  while (Buffer* buf = bufiter.next()) buf->setItem(nullptr);
 
   // Remove references from the demands
-  for (Demand::iterator l = Demand::begin(); l != Demand::end(); ++l)
-    if (l->getItem() == this)
-      l->setItem(nullptr);
+  // TODO rewrite using item-based demand iterator
+  for (auto& l : Demand::all())
+    if (l.getItem() == this) l.setItem(nullptr);
 
   // Remove all item operations referencing this item
-  while (firstOperation)
-    delete firstOperation;
+  while (firstOperation) delete firstOperation;
 
   // The ItemSupplier objects are automatically deleted by the
   // destructor of the Association list class.
 }
 
-
-void Demand::setItem(Item *i)
-{
+void Demand::setItem(Item* i) {
   // No change
-  if (it == i)
-    return;
+  if (it == i) return;
 
   // Unlink from previous item
-  if (it)
-  {
+  if (it) {
     if (it->firstItemDemand == this)
       it->firstItemDemand = nextItemDemand;
-    else
-    {
+    else {
       Demand* dmd = it->firstItemDemand;
-      while (dmd && dmd->nextItemDemand != this)
-        dmd = dmd->nextItemDemand;
-      if (!dmd)
-        throw LogicException("corrupted demand list for an item");
+      while (dmd && dmd->nextItemDemand != this) dmd = dmd->nextItemDemand;
+      if (!dmd) throw LogicException("corrupted demand list for an item");
       dmd->nextItemDemand = nextItemDemand;
     }
   }
 
   // Link at new item
   it = i;
-  if (it)
-  {
+  if (it) {
     nextItemDemand = it->firstItemDemand;
     it->firstItemDemand = this;
   }
 
   // Trigger recreation of the delivery operation
-  if (oper && oper->getHidden())
-    oper = uninitializedDelivery;
+  if (oper && oper->getHidden()) oper = uninitializedDelivery;
+
+  // Trigger level calculation
+  HasLevel::triggerLazyRecomputation();
 
   // Mark as changed
   setChanged();
 }
 
-} // end namespace
+Date Item::findEarliestPurchaseOrder(const PooledString& batch) const {
+  Date earliest = Date::infiniteFuture;
+  bufferIterator buf_iter(this);
+  while (Buffer* buf = buf_iter.next()) {
+    if (buf->getBatch() != batch) continue;
+    for (auto flpln = buf->getFlowPlans().begin();
+         flpln != buf->getFlowPlans().end(); ++flpln) {
+      if (flpln->getDate() >= earliest) break;
+      auto opplan = flpln->getOperationPlan();
+      if (opplan && opplan->getOperation()->hasType<OperationItemSupplier>() &&
+          opplan->getProposed()) {
+        earliest = flpln->getDate();
+        break;
+      }
+    }
+  }
+  return earliest;
+}
+
+}  // namespace frepple

@@ -1,42 +1,38 @@
 #!/usr/bin/python3
 #
-# Copyright (C) 2009-2013 by frePPLe bvba
+# Copyright (C) 2009-2013 by frePPLe bv
 #
-# This program is free software: you can redistribute it and/or modify it
-# under the terms of the GNU Affero General Public License as published
-# by the Free Software Foundation; either version 3 of the License, or
-# (at your option) any later version.
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject to
+# the following conditions:
 #
-# This library is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# General Public License for more details.
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
 #
-# You should have received a copy of the GNU Affero General Public
-# License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+# LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+# WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 #
 # This python script uses the module unittest to run a series of tests.
 #
 # Each test has its own subdirectory. In the description below it is referred
 # to as {testdir}.
-# Three categories of tests are supported.
+# Two categories of tests are supported.
 #
-#  - Type 1: Compiled executable
-#    If an executable file {testdir} or {testdir}.exe is found in the test
-#    directory, the executable is run. The compilation/generation of the
-#    executable is not handled by the script, but it's typically done by
-#    running the command "make check" in the test subdirectory.
-#    The test is successful if both:
-#      1) the exit code of the program is 0
-#      2) the output of the program is identical to the content of the
-#         file {testdir}.expect
-#
-#  - Type 2: Run a Python test script
+#  - Type 1: Run a Python test script
 #    If a file runtest.py is found in the test directory, it is being run
 #    and its exit code is used as the criterium for a successful test.
 #
-#  - Type 3: Process an XML or PY file
+#  - Type 2: Process an XML or PY file
 #    If a file {testdir}.xml or {testdir}.py is found in the test directory, the frepple
 #    commandline executable is called to process the file.
 #    The test is successful if both:
@@ -53,10 +49,6 @@
 #    Execute the tests listed on the command line.
 #  - ./runtest.py
 #    Execute all tests.
-#  - ./runtest.py --vcc
-#    Execute all tests using the executables compiled with Microsofts'
-#    Visual Studio C++ compiler.
-#    Tests of type 1 are skipped in this case.
 #
 import unittest
 import os
@@ -74,39 +66,30 @@ testdir = os.path.abspath(os.path.dirname(sys.argv[0]))
 
 
 def usage():
-  # Print help information and exit
-  print('''
-    Usage to run all tests:
-      ./runtest.py [options]
+    # Print help information and exit
+    print(
+        """
+        Usage to run all tests:
+          ./runtest.py [options]
 
-    Usage with list of tests to run:
-      ./runtest.py [options] {test1} {test2} ...
+        Usage with list of tests to run:
+          ./runtest.py [options] {test1} {test2} ...
 
-    With the following options:
-      -v  --vcc:
-         Test executables created by Microsoft Visual Studio C++ compiler.
-      -d  --debug:
-         Verbose output of the test.
-      -r  --regression:
-         Run only the tests that are relevant for a regression test.
-         The full test suite also includes some extra tests for testing other aspects.
-      -e  --exclude:'
-         Skip a specific test from the suite.
-         This option can be specified multiple times.
-    ''')
+        With the following options:
+          -d  --debug:
+             Verbose output of the test.
+          -r  --regression:
+             Run only the tests that are relevant for a regression test.
+             The full test suite also includes some extra tests for testing other aspects.
+          -e  --exclude:'
+             Skip a specific test from the suite.
+             This option can be specified multiple times.
+        """
+    )
 
 
 def runTestSuite():
     global debug, testdir
-
-    # Detect which platform we are running on.
-    if sys.platform in ['windows', 'win32', 'win64']:
-      # You use the Windows Python.
-      # We test the executables generated by the Visual C++ compiler.
-      platform = 'VCC'
-    else:
-      # Using cygwin or linux Python.
-      platform = 'GCC'
 
     # Frepple uses the time functions from the C-library, which is senstive to
     # timezone settings. In particular the daylight saving time of different
@@ -114,7 +97,7 @@ def runTestSuite():
     # timezones switch to summer time at various dates.
     # The next statement makes sure the test are all running with the same timezone,
     # and in addition a timezone without DST.
-    os.environ['TZ'] = 'EST'
+    os.environ["TZ"] = "EST"
 
     # Parse the command line
     opts = []
@@ -122,68 +105,68 @@ def runTestSuite():
     excluded = []
 
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "dvhre:", ["debug", "vcc", "help", "regression", "exclude="])
+        opts, args = getopt.getopt(
+            sys.argv[1:], "dvhre:", ["debug", "help", "regression", "exclude="]
+        )
     except getopt.GetoptError:
-      usage()
-      sys.exit(1)
-    for o, a in opts:
-      if o in ("-r", "--regression"):
-        # THE HARD_CODED TESTS LISTED HERE ARE SKIPPED WHEN RUNNING A REGRESSION TEST.
-        # These test verify other aspects of the application or broken, unsupported features.
-        excluded = [
-          "xml_remote", "scalability_1", "scalability_2", "scalability_3",
-          "load_bucketized", "jobshop", "multithreading"
-          ]
-        break
-    for o, a in opts:
-      if o in ("-d", "--debug"):
-        debug = True
-      elif o in ("-e", "--exclude"):
-        excluded.append(a)
-      elif o in ("-h", "--help"):
-        # Print help information and exit
         usage()
         sys.exit(1)
+    for o, a in opts:
+        if o in ("-r", "--regression"):
+            # THE HARD_CODED TESTS LISTED HERE ARE SKIPPED WHEN RUNNING A REGRESSION TEST.
+            # These test verify other aspects of the application or broken, unsupported features.
+            excluded = [
+                "xml_remote",
+                "scalability_1",
+                "scalability_2",
+                "scalability_3",
+                "jobshop",
+                "forecast_6",
+            ]
+            break
+    for o, a in opts:
+        if o in ("-d", "--debug"):
+            debug = True
+        elif o in ("-e", "--exclude"):
+            excluded.append(a)
+        elif o in ("-h", "--help"):
+            # Print help information and exit
+            usage()
+            sys.exit(1)
     for i in args:
-      tests.extend(glob.glob(i))
+        tests.extend(glob.glob(i))
 
     # Executable to run
-    os.environ['FREPPLE_HOME'] = os.path.join(testdir, "..", "bin")
-    if platform == 'VCC':
-      os.environ['EXECUTABLE'] = '"' + os.path.join(testdir, "..", "bin", "frepple.exe") + '"'
-    else:
-      # Executable to be used for the tests. Exported as an environment variable.
-      # This default executable is the one valid  for GCC cygwin and GCC *nux builds.
-      os.environ['EXECUTABLE'] = '"%s" --mode=execute %s' % (os.path.join(testdir, "..", "libtool"), os.path.join(testdir, "..", "src", "frepple"))
+    os.environ["FREPPLE_HOME"] = os.path.join(testdir, "..", "bin")
+    os.environ["EXECUTABLE"] = os.path.join(testdir, "..", "bin", "frepple")
 
     # Update the search path for shared libraries, such that the modules
     # can be picked up.
     #  LD_LIBRARY_PATH variable for Linux, Solaris
     #  LIBPATH for AIX
     #  SHLIB_PATH for HPUX
-    #  PATH for windows, cygwin
+    #  PATH for windows
     # We set all variables anyway.
-    for var in ('LD_LIBRARY_PATH', 'LIBPATH', 'SHLIB_PATH', 'PATH'):
-      if var in os.environ:
-        os.environ[var] += os.pathsep + os.environ['FREPPLE_HOME']
-      else:
-        os.environ[var] = os.environ['FREPPLE_HOME']
+    for var in ("LD_LIBRARY_PATH", "LIBPATH", "SHLIB_PATH", "PATH"):
+        if var in os.environ:
+            os.environ[var] += os.pathsep + os.environ["FREPPLE_HOME"]
+        else:
+            os.environ[var] = os.environ["FREPPLE_HOME"]
 
     # Define a list with tests to run
     if len(tests) == 0:
-      # No tests specified, so run them all
-      subdirs = os.listdir(testdir)
-      subdirs.sort()
-      for i in subdirs:
-        if i == '.svn' or os.path.isfile(i):
-            continue
-        tests.append(i)
+        # No tests specified, so run them all
+        subdirs = os.listdir(testdir)
+        subdirs.sort()
+        for i in subdirs:
+            if os.path.isdir(os.path.join(testdir, i)):
+                tests.append(i)
     else:
-      # A list of tests has been specified, and we now validate it
-      for i in tests:
-          if not os.path.isdir(os.path.join(testdir, i)):
-              print("Warning: Test directory " + i + " doesn't exist")
-              tests.remove(i)
+        # A list of tests has been specified, and we now validate it
+        for i in tests:
+            if not os.path.isdir(os.path.join(testdir, i)):
+                print("Warning: Test directory " + i + " doesn't exist")
+                tests.remove(i)
 
     # Now define the test suite
     AllTests = unittest.TestSuite()
@@ -191,94 +174,79 @@ def runTestSuite():
 
         # Skip excluded tests
         if i in excluded:
-          continue
+            continue
 
         # Expand to directory names
         i = os.path.normpath(i)
         tmp = os.path.join(testdir, i, i)
 
-        # Only GCC runs compiled tests
-        if len(glob.glob(os.path.join(testdir, i, '*.cpp'))) > 0 and platform != "GCC":
-          continue
-
         # Check the test type
-        if os.path.isfile(tmp) or os.path.isfile(tmp + '.exe'):
-            # Type 1: (compiled) executable
-            AllTests.addTest(freppleTest(i, 'runExecutable'))
-        elif os.path.isfile(os.path.join(testdir, i, 'runtest.py')):
-            # Type 2: Python script runtest.py available
-            AllTests.addTest(freppleTest(i, 'runScript'))
-        elif os.path.isfile(tmp + '.xml') or os.path.isfile(tmp + '.py'):
-            # Type 3: input XML or Python file specified
-            AllTests.addTest(freppleTest(i, 'runXML'))
+        if os.path.isfile(os.path.join(testdir, i, "runtest.py")):
+            # Type 1: Python script runtest.py available
+            AllTests.addTest(freppleTest(i, "runScript"))
+        elif os.path.isfile(tmp + ".xml") or os.path.isfile(tmp + ".py"):
+            # Type 2: input XML or Python file specified
+            AllTests.addTest(freppleTest(i, "runXML"))
         else:
             # Undetermined - not a test directory
             print("Warning: Unrecognized test in directory " + i)
 
     # Finally, run the test suite now
-    if 'FREPPLE_HOME' in os.environ:
-      print("Running", AllTests.countTestCases(),
-         "tests from directory", testdir,
-         "with FREPPLE_HOME", os.environ['FREPPLE_HOME'])
+    if "FREPPLE_HOME" in os.environ:
+        print(
+            "Running",
+            AllTests.countTestCases(),
+            "tests from directory",
+            testdir,
+            "with FREPPLE_HOME",
+            os.environ["FREPPLE_HOME"],
+        )
     else:
-      print("Running", AllTests.countTestCases(),
-            "tests from directory", testdir)
+        print("Running", AllTests.countTestCases(), "tests from directory", testdir)
     result = unittest.TextTestRunner(verbosity=2, descriptions=False).run(AllTests)
     if not result.wasSuccessful():
-      sys.exit(1)
+        sys.exit(1)
 
 
-class freppleTest (unittest.TestCase):
+class freppleTest(unittest.TestCase):
     def __init__(self, directoryname, methodName):
         self.subdirectory = directoryname
-        super(freppleTest, self).__init__(methodName)
+        super().__init__(methodName)
 
     def setUp(self):
         global testdir
         os.chdir(os.path.join(testdir, self.subdirectory))
 
     def __str__(self):
-        ''' Use the directory name as the test name.'''
+        """Use the directory name as the test name."""
         return self.subdirectory
 
     def runProcess(self, cmd):
-        '''Run a child process.'''
+        """Run a child process."""
         global debug, testdir
         try:
             if debug:
-              o = None
-              print("\nOutput:")
+                o = None
+                print("\nOutput:")
             else:
-              o = PIPE
+                o = PIPE
             proc = Popen(cmd, bufsize=0, stdout=o, stderr=STDOUT, shell=True)
             if not debug:
-              # Because the process doesn't stop until we've read the pipe.
-              proc.communicate()
+                # Because the process doesn't stop until we've read the pipe.
+                proc.communicate()
             res = proc.wait()
             if res:
-              self.assertFalse("Exit code non-zero")
+                self.assertFalse("Exit code non-zero")
         except KeyboardInterrupt:
             # The test has been interupted, which counts as a failure
             self.assertFalse("Interrupted test")
 
-    def runExecutable(self):
-        '''Running a compiled executable'''
-        # Run the command and verify exit code
-        self.runProcess("./" + self.subdirectory + " >test.out")
-
-        # Verify the output
-        if os.path.isfile(self.subdirectory + ".expect"):
-            if not os.path.isfile("test.out"):
-              self.fail("Missing output file")
-            elif diff("test.out", self.subdirectory + ".expect"):
-                self.assertFalse("Difference in output")
-
     def runScript(self):
-        '''Running a test script'''
-        self.runProcess('python3 %s' % os.path.join('.', 'runtest.py'))
+        """Running a test script"""
+        self.runProcess("python3 %s" % os.path.join(".", "runtest.py"))
 
     def runXML(self):
-        '''Running the command line tool with an XML or Python file as argument.'''
+        """Running the command line tool with an XML or Python file as argument."""
         global debug
 
         # Delete previous output
@@ -287,55 +255,70 @@ class freppleTest (unittest.TestCase):
         self.output.extend(glob.glob("output.*.tmp"))
 
         try:
-          for i in self.output:
-            os.remove(i)
+            for i in self.output:
+                os.remove(i)
 
-          # Run the executable
-          if os.path.isfile(self.subdirectory + '.xml'):
-            self.runProcess(os.environ['EXECUTABLE'] + " -validate " + self.subdirectory + ".xml")
-          else:
-            self.runProcess(os.environ['EXECUTABLE'] + " -validate " + self.subdirectory + ".py")
+            # Run the executable
+            if os.path.isfile(self.subdirectory + ".xml"):
+                self.runProcess(
+                    os.environ["EXECUTABLE"]
+                    + " -validate "
+                    + self.subdirectory
+                    + ".xml"
+                )
+            else:
+                self.runProcess(
+                    os.environ["EXECUTABLE"] + " -validate " + self.subdirectory + ".py"
+                )
 
-          # Now check the output file, if there is an expected output given
-          nr = 1
-          while os.path.isfile(self.subdirectory + "." + str(nr) + ".expect"):
-              if os.path.isfile("output." + str(nr) + ".xml"):
-                if debug:
-                  print("Comparing expected and actual output", nr)
-                if diff(self.subdirectory + "." + str(nr) + ".expect",
-                        "output." + str(nr) + ".xml"):
-                  self.assertFalse("Difference in output " + str(nr), "Difference in output " + str(nr))
-              else:
-                self.assertFalse('Missing frePPLe output file ' + str(nr), 'Missing frePPLe output file ' + str(nr))
-              nr += 1
+            # Now check the output file, if there is an expected output given
+            nr = 1
+            while os.path.isfile(self.subdirectory + "." + str(nr) + ".expect"):
+                if os.path.isfile("output." + str(nr) + ".xml"):
+                    if debug:
+                        print("Comparing expected and actual output", nr)
+                    if diff(
+                        self.subdirectory + "." + str(nr) + ".expect",
+                        "output." + str(nr) + ".xml",
+                    ):
+                        self.assertFalse(
+                            "Difference in output " + str(nr),
+                            "Difference in output " + str(nr),
+                        )
+                else:
+                    self.assertFalse(
+                        "Missing frePPLe output file " + str(nr),
+                        "Missing frePPLe output file " + str(nr),
+                    )
+                nr += 1
         except Exception as e:
-          # Skip excluded tests
-          if self.subdirectory not in ['setup_1', 'setup_2', 'setup_3']:
-            raise e
-          else:
-            print('expectedFailure', end='')
-            self.__unittest_expecting_failure__ = True
-            # raise unittest.expectedFailure
+            # Skip excluded tests
+            if self.subdirectory not in ["setup_1", "setup_2", "setup_3"]:
+                raise e
+            else:
+                print("expectedFailure", end="")
+                self.__unittest_expecting_failure__ = True
+                # raise unittest.expectedFailure
 
 
 def diff(f1, f2):
-  '''
-  Compares 2 text files and returns True if they are different.
-  The default one in the package isn't doing the job for us: we want to
-  ignore differences in the file ending.
-  '''
-  fp1 = open(f1, 'rt', encoding="utf-8")
-  fp2 = open(f2, 'rt', encoding="utf-8")
-  while True:
-    b1 = fp1.readline()
-    b2 = fp2.readline()
-    if b1.strip() != b2.strip():
-      return True
-    if not b1:
-      return False
+    """
+    Compares 2 text files and returns True if they are different.
+    The default one in the package isn't doing the job for us: we want to
+    ignore differences in the file ending.
+    """
+    fp1 = open(f1, "rt", encoding="utf-8")
+    fp2 = open(f2, "rt", encoding="utf-8")
+    while True:
+        b1 = fp1.readline()
+        b2 = fp2.readline()
+        if b1.strip() != b2.strip():
+            return True
+        if not b1:
+            return False
 
 
 # If the file is processed as a script, run the test suite.
 # Otherwise, only define the methods.
 if __name__ == "__main__":
-  runTestSuite()
+    runTestSuite()
