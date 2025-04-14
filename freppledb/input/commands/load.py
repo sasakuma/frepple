@@ -176,6 +176,150 @@ class checkBuckets(CheckTask):
 
 
 @PlanTaskRegistry.register
+class checkDatabaseHealth(CheckTask):
+    description = "Sanity check on the database"
+    sequence = 76
+
+    @classmethod
+    def getWeight(cls, **kwargs):
+        return -1 if kwargs.get("skipLoad", False) or "loadplan" in os.environ else 1
+
+    @classmethod
+    def run(cls, database=DEFAULT_DB_ALIAS, **kwargs):
+        with connections[database].cursor() as cursor:
+
+            # check 1: make sure the max(id) is less than the sequence value
+            cursor.execute(
+                """
+                    select s.relname as sequencename,
+                    t.relname as tablename,
+                    a.attname as columnname,
+                    pg_sequences.last_value
+                    from pg_class s
+                    inner join pg_depend d on d.objid=s.oid and d.classid='pg_class'::regclass and d.refclassid='pg_class'::regclass
+                    inner join pg_class t on t.oid=d.refobjid
+                    inner join pg_namespace n on n.oid=t.relnamespace
+                    inner join pg_attribute a on a.attrelid=t.oid and a.attnum=d.refobjsubid
+                    inner join pg_sequences on pg_sequences.sequencename = s.relname
+                    where s.relkind='S' and n.nspname = 'public';
+                """
+            )
+            sequences = [i for i in cursor]
+            for sequencename, tablename, columnname, last_value in sequences:
+                cursor.execute(f"select max({columnname}) from {tablename}")
+                max_id = cursor.fetchone()[0]
+                if max_id and max_id > (last_value or 0):
+                    cursor.execute(
+                        f"""
+                        SELECT setval('{sequencename}', (SELECT max({columnname}) FROM {tablename}));
+                        """
+                    )
+                    logger.info(
+                        f"updated sequence {sequencename} for table {tablename}: nexval too low"
+                    )
+
+            # check 2: make sure the sequence has not reached 90% of the max value
+
+            # identify all the foreign keys
+            cursor.execute(
+                """
+                select rel_kcu.table_name as primary_table,
+                rel_kcu.column_name as primary_column
+                from information_schema.table_constraints tco
+                join information_schema.key_column_usage kcu
+                    on tco.constraint_schema = kcu.constraint_schema
+                    and tco.constraint_name = kcu.constraint_name
+                join information_schema.referential_constraints rco
+                    on tco.constraint_schema = rco.constraint_schema
+                    and tco.constraint_name = rco.constraint_name
+                join information_schema.key_column_usage rel_kcu
+                    on rco.unique_constraint_schema = rel_kcu.constraint_schema
+                    and rco.unique_constraint_name = rel_kcu.constraint_name
+                    and kcu.ordinal_position = rel_kcu.ordinal_position
+                where tco.constraint_type = 'FOREIGN KEY'
+                """
+            )
+            foreign_key_exists = [i for i in cursor]
+
+            cursor.execute(
+                """
+                with cte as (
+                select sequencename from pg_sequences
+                where schemaname='public'
+                and last_value > 0.9 * max_value)
+                select s.relname as sequencename,
+                t.relname as tablename,
+                a.attname as columnname
+                from pg_class s
+                inner join pg_depend d on d.objid=s.oid and d.classid='pg_class'::regclass and d.refclassid='pg_class'::regclass
+                inner join pg_class t on t.oid=d.refobjid
+                inner join pg_namespace n on n.oid=t.relnamespace
+                inner join pg_attribute a on a.attrelid=t.oid and a.attnum=d.refobjsubid
+                inner join cte on cte.sequencename = s.relname
+                where s.relkind='S' and n.nspname = 'public'
+                """
+            )
+            sequences = [i for i in cursor]
+            for sequencename, tablename, columnname in sequences:
+
+                # we can't update the ids if this is a foreign key
+                if (tablename, columnname) in foreign_key_exists:
+                    logger.warning(
+                        f"sequence {sequencename} is almost at its maximum but can't be updated as it's a foreign key"
+                    )
+                    continue
+
+                cursor.execute(
+                    f"""
+                    WITH numbered_rows AS (
+                    SELECT {columnname}, ROW_NUMBER() OVER (ORDER BY {columnname}) AS new_id
+                    FROM {tablename}
+                    )
+                    UPDATE {tablename}
+                    SET {columnname} = numbered_rows.new_id
+                    FROM numbered_rows
+                    WHERE {tablename}.{columnname} = numbered_rows.{columnname};
+                    SELECT setval('{sequencename}', (SELECT max({columnname}) FROM {tablename}));
+                    """
+                )
+                logger.info(
+                    f"updated sequence {sequencename} for table {tablename}: reaching max value"
+                )
+
+            # check 3: Make sure table common_comment remains below 5M records
+            cursor.execute("select count(*) from common_comment")
+            to_delete = cursor.fetchone()[0] - 5000000
+            if to_delete > 0:
+                cursor.execute(
+                    """
+                    with recs_to_delete as (
+                        select id from (
+                            select 
+                              id,
+                              row_number() over (order by lastmodified ASC) AS row_num
+                            from common_comment
+                            where content_type_id  in (
+                                -- delete only from the entities with most comments
+                                select top5.content_type_id
+                                from common_comment top5
+                                group by top5.content_type_id
+                                order by count(*) desc
+                                limit 5
+                            )
+                            and common_comment.type != 'comment'
+                        ) subquery
+                        where row_num <= %s
+                    )
+                    delete from common_comment
+                    using recs_to_delete
+                    where common_comment.id = recs_to_delete.id
+                    """,
+                    (to_delete,),
+                )
+                logger.info(f"Deleted {cursor.rowcount} old comments")
+
+
+@PlanTaskRegistry.register
 class checkBrokenSupplyPath(CheckTask):
     # check for item location combinations in the demand
     # check for item location that are consumed in operation materials
@@ -238,7 +382,8 @@ class checkBrokenSupplyPath(CheckTask):
                         with cte as (
                         select 'Unknown supplier' as supplier_id, item_id, location_id from demand where status in ('open','quote')
                         union
-                        select 'Unknown supplier', operationmaterial.item_id, operation.location_id from operationmaterial
+                        select 'Unknown supplier', operationmaterial.item_id,
+                        coalesce(operationmaterial.location_id, operation.location_id) from operationmaterial
                         inner join operation on operation.name = operationmaterial.operation_id
                         where operationmaterial.quantity < 0
                         %s
@@ -277,7 +422,8 @@ class checkBrokenSupplyPath(CheckTask):
                         where itemsupplier.location_id is null and coalesce(itemsupplier.effective_end, %%s) >= %%s
                         and itemsupplier.priority is distinct from 0
                         union
-                        select 'Unknown supplier', operationmaterial.item_id, operation.location_id from operationmaterial
+                        select 'Unknown supplier', operationmaterial.item_id,
+                        coalesce(operationmaterial.location_id, operation.location_id) from operationmaterial
                         inner join operation on operation.name = operationmaterial.operation_id
                         where operationmaterial.quantity > 0 and coalesce(operation.effective_end, %%s) >= %%s
                         and operation.priority is distinct from 0
@@ -332,7 +478,7 @@ class loadParameter(LoadTask):
             with connections[database].chunked_cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT name, value
+                    SELECT name, trim(value)
                     FROM common_parameter
                     where name in (
                        'currentdate', 'last_currentdate',
@@ -414,7 +560,11 @@ class loadLocations(LoadTask):
                 cnt = 0
                 starttime = time()
 
-                attrs = [f[0] for f in getAttributes(Location)]
+                attrs = [
+                    f[0]
+                    for f in getAttributes(Location)
+                    if not f[2].startswith("foreignkey:")
+                ]
                 if attrs:
                     attrsql = ", %s" % ", ".join(attrs)
                 else:
@@ -732,7 +882,9 @@ class loadOperations(LoadTask):
         else:
             filter_where = ""
 
-        attrs = [f[0] for f in getAttributes(Operation)]
+        attrs = [
+            f[0] for f in getAttributes(Operation) if not f[2].startswith("foreignkey:")
+        ]
         if attrs:
             attrsql = ", %s" % ", ".join(attrs)
         else:
@@ -1101,7 +1253,11 @@ class loadItems(LoadTask):
             with connections[database].chunked_cursor() as cursor:
                 cnt = 0
                 starttime = time()
-                attrs = [f[0] for f in getAttributes(Item)]
+                attrs = [
+                    f[0]
+                    for f in getAttributes(Item)
+                    if not f[2].startswith("foreignkey:")
+                ]
                 if attrs:
                     attrsql = ", %s" % ", ".join(attrs)
                 else:
@@ -1595,7 +1751,9 @@ class loadResources(LoadTask):
         else:
             filter_where = ""
 
-        attrs = [f[0] for f in getAttributes(Resource)]
+        attrs = [
+            f[0] for f in getAttributes(Resource) if not f[2].startswith("foreignkey:")
+        ]
         if attrs:
             attrsql = ", %s" % ", ".join(attrs)
         else:
@@ -1773,7 +1931,7 @@ class loadOperationMaterials(LoadTask):
                     """
                 SELECT
                   operation_id, item_id, quantity, type, effective_start, effective_end,
-                  name, priority, search, source, transferbatch, quantity_fixed, "offset"
+                  name, priority, search, source, transferbatch, quantity_fixed, "offset", location_id
                 FROM operationmaterial %s
                 ORDER BY operation_id, priority, item_id
                 """
@@ -1785,6 +1943,7 @@ class loadOperationMaterials(LoadTask):
                         curflow = frepple.flow(
                             operation=frepple.operation(name=i[0]),
                             item=frepple.item(name=i[1]),
+                            location=frepple.location(name=i[13]) if i[13] else None,
                             quantity=i[2],
                             quantity_fixed=i[11],
                             type="flow_%s" % i[3],
@@ -1927,7 +2086,9 @@ class loadDemand(LoadTask):
         else:
             filter_and = ""
 
-        attrs = [f[0] for f in getAttributes(Demand)]
+        attrs = [
+            f[0] for f in getAttributes(Demand) if not f[2].startswith("foreignkey:")
+        ]
         if attrs:
             attrsql = ", %s" % ", ".join(attrs)
         else:
@@ -2077,7 +2238,9 @@ class loadOperationPlans(LoadTask):
                 cnt_dlvr = 0
 
                 attrs = [
-                    "operationplan.%s" % f[0] for f in getAttributes(OperationPlan)
+                    "operationplan.%s" % f[0]
+                    for f in getAttributes(OperationPlan)
+                    if not f[2].startswith("foreignkey:")
                 ]
                 if attrs:
                     attrsql = ", %s" % ", ".join(attrs)
@@ -2106,6 +2269,7 @@ class loadOperationPlans(LoadTask):
                           then (operationplan.plan->>'setupoverride')::integer
                         end,
                         coalesce(dmd.name, null),
+                        remark,
                         coalesce(forecast.name, null), operationplan.due
                         %s
                         FROM operationplan
@@ -2144,7 +2308,8 @@ class loadOperationPlans(LoadTask):
                         case when operationplan.plan ? 'setupoverride'
                           then (operationplan.plan->>'setupoverride')::integer
                         end,
-                        coalesce(dmd.name, null)
+                        coalesce(dmd.name, null),
+                        remark
                         %s
                         FROM operationplan
                         LEFT OUTER JOIN (select name from demand
@@ -2164,10 +2329,10 @@ class loadOperationPlans(LoadTask):
                     try:
                         if i[17]:
                             dmd = frepple.demand(name=i[17])
-                        elif with_fcst and i[18] and i[19]:
+                        elif with_fcst and i[19] and i[20]:
                             dmd = frepple.demand_forecastbucket(
-                                forecast=frepple.demand_forecast(name=i[18]),
-                                start=i[19],
+                                forecast=frepple.demand_forecast(name=i[19]),
+                                start=i[20],
                             )
                         else:
                             dmd = None
@@ -2185,6 +2350,7 @@ class loadOperationPlans(LoadTask):
                                 batch=i[13],
                                 quantity_completed=i[14],
                                 resources=i[15],
+                                remark=i[18],
                             )
                             if opplan:
                                 if i[5] == "confirmed":
@@ -2214,6 +2380,7 @@ class loadOperationPlans(LoadTask):
                                 source=i[6],
                                 create=create_flag,
                                 batch=i[13],
+                                remark=i[18],
                             )
                             if opplan and i[5] == "confirmed":
                                 if not consume_capacity:
@@ -2233,6 +2400,7 @@ class loadOperationPlans(LoadTask):
                                 source=i[6],
                                 create=create_flag,
                                 batch=i[13],
+                                remark=i[18],
                             )
                             if opplan:
                                 if i[5] == "confirmed":
@@ -2259,6 +2427,7 @@ class loadOperationPlans(LoadTask):
                                 source=i[6],
                                 create=create_flag,
                                 batch=i[13],
+                                remark=i[18],
                             )
                             if opplan:
                                 if i[5] == "confirmed":
@@ -2275,7 +2444,7 @@ class loadOperationPlans(LoadTask):
                             continue
 
                         if opplan:
-                            idx = 20 if with_fcst else 18
+                            idx = 21 if with_fcst else 19
                             for a in getAttributes(OperationPlan):
                                 setattr(opplan, a[0], i[idx])
                                 idx += 1
@@ -2302,7 +2471,7 @@ class loadOperationPlans(LoadTask):
                             where operationplan_id = operationplan.reference
                             order by resource_id
                         ),
-                        coalesce(dmd.name, null), coalesce(forecast.name, null), operationplan.due %s
+                        coalesce(dmd.name, null), remark, coalesce(forecast.name, null), operationplan.due %s
                         FROM operationplan
                         INNER JOIN (select reference
                         from operationplan %s
@@ -2346,7 +2515,8 @@ class loadOperationPlans(LoadTask):
                             where operationplan_id = operationplan.reference
                             order by resource_id
                         ),
-                        coalesce(dmd.name, null) %s
+                        coalesce(dmd.name, null),
+                        remark %s
                         FROM operationplan
                         INNER JOIN (select reference
                         from operationplan %s
@@ -2385,6 +2555,7 @@ class loadOperationPlans(LoadTask):
                             statusNoPropagation=i[5],
                             batch=i[8],
                             resources=i[9],
+                            remark=i[11],
                         )
                         if opplan:
                             if i[5] == "confirmed":
@@ -2405,12 +2576,12 @@ class loadOperationPlans(LoadTask):
                                     )
                             if i[10]:
                                 opplan.demand = frepple.demand(name=i[10])
-                            elif with_fcst and i[11] and i[12]:
+                            elif with_fcst and i[12] and i[13]:
                                 opplan.demand = frepple.forecastbucket(
-                                    forecast=frepple.demand_forecast(name=i[11]),
-                                    start=i[12],
+                                    forecast=frepple.demand_forecast(name=i[12]),
+                                    start=i[13],
                                 )
-                            idx = 13 if with_fcst else 11
+                            idx = 14 if with_fcst else 12
                             for a in getAttributes(OperationPlan):
                                 setattr(opplan, a[0], i[idx])
                                 idx += 1

@@ -22,13 +22,10 @@
 #
 from datetime import datetime
 from importlib import import_module
-from importlib.util import find_spec
 import inspect
 import json
 import logging
 from multiprocessing import Process
-import os
-from pathlib import Path
 from psycopg2.extras import execute_batch
 import sys
 import time
@@ -38,6 +35,7 @@ from django.contrib.admin.utils import quote
 from django.contrib.auth.models import AbstractUser, Group
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
+from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core import mail
 from django.core.validators import FileExtensionValidator
@@ -56,6 +54,7 @@ from django.utils.text import capfirst
 
 from freppledb import runFunction
 from freppledb.boot import addAttributesFromDatabase
+from freppledb.common.utils import forceWsgiReload
 
 logger = logging.getLogger(__name__)
 
@@ -334,8 +333,12 @@ class Scenario(models.Model):
     status = models.CharField(
         _("status"), max_length=10, null=False, blank=False, choices=scenarioStatus
     )
-    lastrefresh = models.DateTimeField(_("last refreshed"), null=True, editable=False)
     help_url = models.URLField("help", null=True, editable=False)
+    info = models.JSONField(blank=True, null=True)
+
+    @property
+    def tag(self):
+        return self.description or self.name
 
     def __str__(self):
         return self.name
@@ -383,6 +386,10 @@ class Scenario(models.Model):
         ordering = ["name"]
 
 
+def defaultdatabase():
+    return list([DEFAULT_DB_ALIAS])
+
+
 class User(AbstractUser):
     languageList = tuple(
         [("auto", _("Detect automatically"))] + list(settings.LANGUAGES)
@@ -428,21 +435,141 @@ class User(AbstractUser):
         blank=True,
     )
     scenario_themes = models.JSONField(blank=True, null=True)
+    databases = ArrayField(
+        models.CharField(_("databases"), max_length=300),
+        null=True,
+        default=defaultdatabase,
+    )
+
+    @property
+    def scenarios(self):
+        if not hasattr(self, "_scenarios"):
+            self._scenarios = (
+                Scenario.objects.using(DEFAULT_DB_ALIAS)
+                .filter(Q(status="In use") | Q(name=DEFAULT_DB_ALIAS))
+                .filter(
+                    name__in=self.databases
+                    or ([self._state.db] if self.is_active else [])
+                )
+            )
+            if not self._scenarios:
+                Scenario.syncWithSettings()
+                self._scenarios = (
+                    Scenario.objects.using(DEFAULT_DB_ALIAS)
+                    .filter(Q(status="In use") | Q(name=DEFAULT_DB_ALIAS))
+                    .filter(
+                        name__in=self.databases
+                        or ([self._state.db] if self.is_active else [])
+                    )
+                )
+        return self._scenarios
+
+    def switchDatabase(self, new_database):
+        """
+        The main fields of a user are maintained in the default database.
+        These fields are lazily copied to other databases when needed.
+
+        Some user fields are however database-specific. This method
+        is used to
+        """
+        if new_database == self._state.db:
+            # No switch needed
+            return
+        try:
+            user_sc = User.objects.using(new_database).get(pk=self.pk)
+            self.is_superuser = user_sc.is_superuser
+            self.horizonlength = user_sc.horizonlength
+            self.horizonbefore = user_sc.horizonbefore
+            self.horizontype = user_sc.horizontype
+            self.horizonbuckets = user_sc.horizonbuckets
+            self.horizonstart = user_sc.horizonstart
+            self.horizonend = user_sc.horizonend
+            self.horizonunit = user_sc.horizonunit
+            if hasattr(self, "_state"):
+                self._state.db = new_database
+        except User.DoesNotExist:
+            raise Exception(
+                f"User {self.pk} {self.username} doesn't exist in database {new_database}"
+            )
 
     def save(
         self, force_insert=False, force_update=False, using=None, update_fields=None
     ):
-        """
-        Every change to a user model is saved to all active scenarios.
-
-        The is_superuser and is_active fields can be different in each scenario.
-        All other fields are expected to be identical in each database.
-
-        Because of the logic in this method creating users directly in the
-        database tables is NOT a good idea!
-        """
         # We want to automatically give access to the django admin to all users
         self.is_staff = True
+        if self.id is not None:
+            # Update an existing user
+            is_active_modified = False
+            if self._state.db != DEFAULT_DB_ALIAS:
+                # Make sure the default database is up to date
+                tmp = self._state.db
+                self._state.db = DEFAULT_DB_ALIAS
+
+                if not update_fields or "is_active" in update_fields:
+                    user_in_default_db = User.objects.using(DEFAULT_DB_ALIAS).get(
+                        id=self.id
+                    )
+                    self.databases = user_in_default_db.databases
+                    if self.databases and tmp in self.databases and not self.is_active:
+                        self.databases.remove(tmp)
+                        is_active_modified = True
+                    elif not self.databases and self.is_active:
+                        self.databases = [tmp]
+                        is_active_modified = True
+                    elif (
+                        self.databases and tmp not in self.databases and self.is_active
+                    ):
+                        self.databases.append(tmp)
+                        is_active_modified = True
+
+                if not update_fields:
+                    update_fields2 = [
+                        "username",
+                        "password",
+                        "first_name",
+                        "last_name",
+                        "email",
+                        "date_joined",
+                        "language",
+                        "theme",
+                        "avatar",
+                        "pagesize",
+                        "lastmodified",
+                        "is_staff",
+                        "default_scenario",
+                    ]
+                    if is_active_modified:
+                        update_fields2.append("databases")
+                else:
+                    # Important is not to copy all fields.
+                    update_fields2 = update_fields[:]  # Copy!
+                    if "is_active" in update_fields2:
+                        update_fields2.remove("is_active")
+                    if is_active_modified:
+                        update_fields2.append("databases")
+                    if "is_superuser" in update_fields:
+                        update_fields2.remove("is_superuser")
+                    if "databases" in update_fields:
+                        update_fields2.remove("databases")
+                    if "last_login" in update_fields:
+                        update_fields2.remove("last_login")
+
+                super().save(
+                    force_insert=force_insert,
+                    force_update=force_update,
+                    using=DEFAULT_DB_ALIAS,
+                    update_fields=update_fields2,
+                )
+                self._state.db = tmp
+
+            return super().save(
+                force_insert=force_insert,
+                force_update=force_update,
+                using=using,
+                update_fields=update_fields,
+            )
+
+        # Extra logic when creating a new user
         if not using:
             using = getattr(self, "_state", None)
             if using:
@@ -454,94 +581,39 @@ class User(AbstractUser):
                 if not using:
                     using = DEFAULT_DB_ALIAS
 
+        Scenario.syncWithSettings()
         scenarios = [
             i["name"]
             for i in Scenario.objects.using(DEFAULT_DB_ALIAS)
-            .filter(status="In use")
+            .filter(Q(status="In use") | Q(name=DEFAULT_DB_ALIAS))
             .values("name")
             if i["name"] in settings.DATABASES
         ]
 
-        # The same id of a new user MUST be identical in all databases.
+        # The id of a new user MUST be identical in all databases.
         # We manipulate the sequences, and correct if required.
-        newuser = False
         tmp_is_active = self.is_active
         tmp_is_superuser = self.is_superuser
-        if self.id is None:
-            newuser = True
-            self.id = 0
-            cur_seq = {}
-            for db in scenarios:
+        self.id = 0
+        cur_seq = {}
+        self.is_active = False
+        self.is_superuser = False
+        for db in scenarios:
+            with connections[db].cursor() as cursor:
+                cursor.execute(
+                    "select greatest(max(id+1), nextval('common_user_id_seq')) from common_user"
+                )
+                cur_seq[db] = cursor.fetchone()[0]
+                if cur_seq[db] > self.id:
+                    self.id = cur_seq[db]
+        for db in scenarios:
+            if cur_seq[db] != self.id:
                 with connections[db].cursor() as cursor:
-                    cursor.execute("select nextval('common_user_id_seq')")
-                    cur_seq[db] = cursor.fetchone()[0]
-                    if cur_seq[db] > self.id:
-                        self.id = cur_seq[db]
-            for db in scenarios:
-                if cur_seq[db] != self.id:
-                    with connections[db].cursor() as cursor:
-                        cursor.execute(
-                            "select setval('common_user_id_seq', %s)", [self.id - 1]
-                        )
-            self.is_active = False
-            self.is_superuser = False
-
-        # Save only specific fields which we want to have identical across
-        # all scenario databases.
-        if not update_fields:
-            update_fields2 = [
-                "username",
-                "password",
-                "last_login",
-                "first_name",
-                "last_name",
-                "email",
-                "date_joined",
-                "language",
-                "theme",
-                "avatar",
-                "pagesize",
-                "lastmodified",
-                "is_staff",
-                "default_scenario",
-            ]
-        else:
-            # Important is NOT to save the is_active and is_superuser fields.
-            update_fields2 = update_fields[:]  # Copy!
-            if "is_active" in update_fields2:
-                update_fields2.remove("is_active")
-            if "is_superuser" in update_fields:
-                update_fields2.remove("is_superuser")
-        if update_fields2 or newuser:
-            for db in scenarios:
-                if db == using:
-                    continue
-                try:
-                    with transaction.atomic(using=db, savepoint=True):
-                        super().save(
-                            force_insert=force_insert,
-                            force_update=force_update,
-                            using=db,
-                            update_fields=update_fields2 if not newuser else None,
-                        )
-                except Exception:
-                    try:
-                        with transaction.atomic(using=db, savepoint=False):
-                            newuser = True
-                            super().save(
-                                force_insert=force_insert,
-                                force_update=force_update,
-                                using=db,
-                            )
-                            if settings.DEFAULT_USER_GROUP:
-                                grp = (
-                                    Group.objects.all()
-                                    .using(db)
-                                    .get_or_create(name=settings.DEFAULT_USER_GROUP)[0]
-                                )
-                                self.groups.add(grp)
-                    except Exception as e:
-                        logger.warning("Can't save user in scenario '%s': %s" % (db, e))
+                    cursor.execute(
+                        "select setval('common_user_id_seq', %s)", [self.id - 1]
+                    )
+            if db != using:
+                super().save(force_insert=True, using=db)
 
         grp = (
             (
@@ -549,16 +621,19 @@ class User(AbstractUser):
                 .using(using)
                 .get_or_create(name=settings.DEFAULT_USER_GROUP)[0]
             )
-            if newuser and settings.DEFAULT_USER_GROUP
+            if settings.DEFAULT_USER_GROUP
             else None
         )
 
-        # Continue with the regular save, as if nothing happened.
+        # Continue with the regular creation as if nothing happened.
         self.is_active = tmp_is_active
-        if newuser and not (grp and grp.permissions.exists()):
-            self.is_superuser = True
-        else:
+        if grp and grp.permissions.exists():
             self.is_superuser = tmp_is_superuser
+        else:
+            # No permissions are configured for new users, which is the default setup.
+            # We make all users superusers.
+            self.is_superuser = True
+
         self._state.db = using
         super().save(
             force_insert=force_insert,
@@ -566,7 +641,7 @@ class User(AbstractUser):
             using=using,
             update_fields=update_fields,
         )
-        if newuser and grp:
+        if grp:
             self.groups.add(grp)
 
     def delete(self, *args, **kwargs):
@@ -576,13 +651,13 @@ class User(AbstractUser):
         # Delete in all other scenarios
         for db in (
             Scenario.objects.using(DEFAULT_DB_ALIAS)
-            .filter(status="In use")
-            .values("name")
+            .filter(Q(status="In use") & ~Q(name=cur_db))
+            .only("name")
         ):
-            if db["name"] in settings.DATABASES:
-                self._state.db = db["name"]
+            if db.name in settings.DATABASES:
+                self._state.db = db.name
                 self.id = cur_id
-                super().delete(*args, using=db["name"], **kwargs)
+                super().delete(*args, using=db.name, **kwargs)
 
         # Delete in current scenario
         self._state.db = cur_db
@@ -708,6 +783,57 @@ class User(AbstractUser):
             self.preferences.using(database).delete()
         elif action != "nochange":
             raise Exception("Unknown personalization action")
+
+    @staticmethod
+    def synchronize(user=None, database=None):
+        """
+        All user fields (except the is_active field) are maintained only in the main database.
+        This method is called to lazily copy this information to other scenarios if needed.
+        """
+        if user is None:
+            userlist = User.objects.using(DEFAULT_DB_ALIAS)
+        else:
+            userlist = [
+                User.objects.using(DEFAULT_DB_ALIAS)
+                .filter(Q(pk=str(user)) | Q(username=str(user)) | Q(email=str(user)))
+                .first()
+            ]
+
+        dblist = (
+            Scenario.objects.using(DEFAULT_DB_ALIAS)
+            .filter(Q(status="In use") & ~Q(name=DEFAULT_DB_ALIAS))
+            .only("name")
+        )
+        if database:
+            dblist = dblist.filter(name=database)
+        for db in dblist:
+            for usr_dflt in userlist:
+                usr_scenario = (
+                    User.objects.using(db.name).filter(pk=usr_dflt.pk).first()
+                )
+                if usr_scenario:
+                    for f in [  # TODO build dynamic field list
+                        "username",
+                        "password",
+                        "first_name",
+                        "last_login",
+                        "last_name",
+                        "email",
+                        "date_joined",
+                        "language",
+                        "theme",
+                        "avatar",
+                        "pagesize",
+                        "lastmodified",
+                        "is_staff",
+                        "default_scenario",
+                    ]:
+                        setattr(usr_scenario, f, getattr(usr_dflt, f))
+                    usr_scenario.is_active = (
+                        usr_dflt.databases and db.name in usr_dflt.databases
+                    ) or False
+                    usr_scenario.databases = usr_dflt.databases
+                    usr_scenario.save()
 
 
 class UserPreference(models.Model):
@@ -1577,30 +1703,43 @@ class Attribute(AuditModel):
 
     def _getContentTypeChoices():
         try:
-            return sorted(
-                [
-                    (i.model, i.model)
-                    for i in ContentType.objects.all()
-                    .using(DEFAULT_DB_ALIAS)
-                    .exclude(
-                        app_label__in=[
-                            "auth",
-                            "contenttypes",
-                            "admin",
-                            "reportmanager",
-                            "archive",
-                            "out",
-                        ]
-                    )
-                    if i.model
-                    not in (
-                        "purchaseorder",
-                        "deliveryorder",
-                        "manufacturingorder",
-                        "distributionorder",
-                    )
-                ]
-            )
+            return [
+                (i.model, i.model)
+                for i in ContentType.objects.all()
+                .using(DEFAULT_DB_ALIAS)
+                .exclude(
+                    app_label__in=[
+                        "admin",
+                        "archive",
+                        "auth",
+                        "contenttypes",
+                        "out",
+                        "reportmanager",
+                    ]
+                )
+                if i.model
+                not in (
+                    "attribute",
+                    "comment",
+                    "dataexport",
+                    "deliveryorder",
+                    "distributionorder",
+                    "follower",
+                    "forecastplan",
+                    "forecastplanview",
+                    "manufacturingorder",
+                    "measure",
+                    "notification",
+                    "parameter",
+                    "purchaseorder",
+                    "resourcesummary",
+                    "scenario",
+                    "scheduledtask",
+                    "systemmessage",
+                    "task",
+                    "userpreference",
+                )
+            ]
         except Exception:
             return []
 
@@ -1644,18 +1783,6 @@ class Attribute(AuditModel):
             self.name = self.name.lower()
         super().clean_fields(exclude=exclude)
 
-    @staticmethod
-    def forceReload():
-        wsgi = os.path.join(settings.FREPPLE_CONFIGDIR, "wsgi.py")
-        if os.access(wsgi, os.W_OK):
-            Path(wsgi).touch()
-        else:
-            wsgi = os.path.join(
-                os.path.split(find_spec("freppledb").origin)[0], "wsgi.py"
-            )
-            if os.access(wsgi, os.W_OK):
-                Path(wsgi).touch()
-
     def save(self, *args, **kwargs):
         # Call the real save() method
         super().save(*args, **kwargs)
@@ -1665,7 +1792,7 @@ class Attribute(AuditModel):
 
         # Trigger reloading of the django app.
         # The model when then see the new attribute field.
-        self.forceReload()
+        forceWsgiReload()
 
     def delete(self, *args, **kwargs):
         # Call the real save() method
@@ -1676,7 +1803,24 @@ class Attribute(AuditModel):
 
         # Trigger reloading of the django app.
         # The model when then see the new attribute field.
-        self.forceReload()
+        forceWsgiReload()
+
+    @staticmethod
+    def synchronize(database):
+        """
+        Attributes are maintained only in the main database.
+        This method is called to lazily copy this information to another.
+        """
+        for db in (
+            Scenario.objects.using(DEFAULT_DB_ALIAS)
+            .filter(Q(status="In use") & ~Q(name=DEFAULT_DB_ALIAS))
+            .filter(name=database)
+            .only("name")
+        ):
+            Attribute.objects.using(database).all().delete()
+            for attr in Attribute.objects.using(DEFAULT_DB_ALIAS).all():
+                attr.pk = None
+                attr.save(using=db.name)
 
     class Meta:
         verbose_name = _("attribute")

@@ -702,7 +702,7 @@ var grid = {
   },
 
   runAction: function (next_action) {
-    if ($("#actions").val() != "no_action")
+    if (!["no_action", "actions1"].includes($("#actions").val()))
       actions[$("#actions").val()]();
   },
 
@@ -743,7 +743,7 @@ var grid = {
           icon = "fa-minus-square-o";
       }
       if (cross[i]['editable'])
-        result += '<span class="editablepivotcol">' + cross[i]['name'] + '</span>';
+        result += cross[i]['name'] + '<input style="width:0px" class="invisible"/><br>';
       else if (cross[i]["expand"])
         result += cross[i]['name'] + '&nbsp;<i style="cursor: pointer" class="fa ' + icon + '" onclick="grid.expandCross(this, ' + i + ')"></i><br>';
       else
@@ -1561,7 +1561,7 @@ var grid = {
   // Display filter dialog
   showFilter: function (gridid, curfilterid, filterid) {
     $("#addsearch").val("");
-    $("#filterfield").remove();
+    $("#filterOperandfield").remove();
     grid.handlerinstalled = false;
     hideModal('popup');
     hideModal('timebuckets');
@@ -1617,12 +1617,15 @@ var grid = {
       event.stopPropagation();
       event.preventDefault();
       var field = $(event.target).attr("data-filterfield");
+      console.log(1620, $(event.target).attr("data-filterfield"));
     }
     else
       var field = $("#filterfield [data-filterfield]").first().attr("data-filterfield");
+    console.log(1624, field, $("#grid").jqGrid('getGridParam', 'colModel').filter((col)=> (col.name == 'name'))[0]["searchoptions"]["sopt"]);
+    let hasContains = $("#grid").jqGrid('getGridParam', 'colModel').filter((col)=> (col.name == 'name'))[0].searchoptions.sopt.indexOf('cn') > -1;
     var n = {
       "field": field,
-      "op": "cn",
+      "op": hasContains ? "cn" : "eq",
       "data": $("#addsearch").val(),
       "filtercount": ++grid.filtercount
     };
@@ -1660,7 +1663,8 @@ var grid = {
     $(document).off("click", grid.clickFilter);
     grid.handlerinstalled = false;
     $("#addsearch").val("");
-    $("#filterfield").remove();
+    $("#filterOperandfield").remove();
+    $('#filterfield').remove;
     $("#tooltip").css("display", "none");
   },
 
@@ -1669,20 +1673,37 @@ var grid = {
       $(document).off("click", grid.clickFilter);
       grid.handlerinstalled = false;
       $("#addsearch").val("");
-      $("#filterfield").remove();
+      $('#filterfield').remove();
     }
   },
 
-  showFilterList: function (el) {
+  clickFilterOperands: function (event) {
+    if ($(event.target).attr('id') != "addsearch") {
+      $(document).off("click", grid.clickFilterOperands);
+      grid.handlerinstalled = false;
+      // $("#addsearch").val("");
+      $("#filterOperandfield").remove();
+    }
+  },
+
+  showFilterList: function (event) {
+    let el = event.target;
+    $('#filterOperandfield').remove();
+    $('#filterfield').remove();
     $.jgrid.hideModal("#searchmodfbox_grid");
+    console.log("1690 showFilterList", event.target);
+    // el = $("#addsearch");
     event.stopPropagation();
     if (!grid.handlerinstalled) {
+      console.log(1693, $("#grid").jqGrid('getGridParam', 'colModel'));
       $(document).on("click", grid.clickFilter);
       var l = $('<span id="filterfield" class="list-group dropdown-menu">');
       var cnt = 15;  // Limits the number fields to choose from
       for (var col of $("#grid").jqGrid('getGridParam', 'colModel')) {
         var searchoptions = col.searchoptions;
-        if (searchoptions && searchoptions.sopt && searchoptions.sopt.includes("cn")) {
+        console.log(1700, col.name, col.searchoptions);
+
+        if (searchoptions && searchoptions.sopt) {
           var n = $('<a class="dropdown-item" onclick="grid.addFilter(event)" />');
           n.attr("data-filterfield", col.name);
           n.html(gettext("Search") + ' ' + col.label);
@@ -1692,7 +1713,98 @@ var grid = {
       }
       $(el).before(l);
       grid.handlerinstalled = true;
+      console.log("1710 showFilterList", el, l);
     }
+  },
+
+  showFilterOperandsList: function (event) {
+    let el = event.target;
+    $('#filterOperandfield').remove();
+    $('#filterfield').remove();
+    $.jgrid.hideModal("#searchmodfbox_grid");
+    console.log(1715, $("#grid").jqGrid('getGridParam', 'colModel'), event.target.attributes);
+    let colname = $("#fieldconfig")[0].attributes.fieldname.value;
+    event.stopPropagation();
+    if (!grid.handlerinstalled) {
+      $(document).on("click", grid.clickFilterOperands);
+      let l = $('<span id="filterOperandfield" class="list-group dropdown-menu">');
+      let col = $("#grid").jqGrid('getGridParam', 'colModel').filter((col)=> (col.name == colname))[0];
+      // console.log(1719, $("#grid").jqGrid('getGridParam', 'colModel'), event.target.attributes.colname.value)
+      let searchoptions = col.searchoptions;
+
+      if (searchoptions && searchoptions.sopt) {
+        for (let sopt of searchoptions.sopt) {
+          let n = $('<a class="dropdown-item" onclick="grid.addFilter(event)" />');
+          n.attr("data-filteroperandfield", sopt);
+          n.html(grid.findOperandLabel(sopt));
+          l.append(n);
+        }
+      }
+
+      $(el).before(l);
+      grid.handlerinstalled = true;
+    }
+  },
+
+  showFilterConfig: function (event) {
+    let el = event.target;
+    $('#filterconfig').remove();
+    $.jgrid.hideModal("#searchmodfbox_grid");
+    console.log(event);
+    event.stopPropagation();
+    let field = $("#grid").jqGrid('getGridParam', 'colModel')[1];
+    let operand = 'eq';
+    if (!grid.handlerinstalled) {
+      // $(document).on("click", grid.clickFilterOperands);
+      htmlString = [
+        '<div id="filterconfig" class="dropdown-menu" style="margin-top: 45px; display: block; position: absolute; background: aqua;">',
+        '<div id="fieldconfig" fieldname="' + field.name + '" style="width: 40%; cursor: pointer;" class="d-inline p-2" onclick="grid.showFilterList(event)">' + field.label + '</div>',
+        '<div id="operandconfig" colname="' + operand + '" style="width: 40%; cursor: pointer;" class="d-inline p-2" onclick="grid.showFilterOperandsList(event)">' + grid.findOperandLabel(operand) + '</div>',
+        '<i class="fa fa-trash p-10 d-inline"></i>',
+        '</div>'
+      ].join("");
+      var configbox = $(htmlString);
+      console.log(1756, configbox);
+
+    // var deleteelement = $('<span class="fa fa-times"/>');
+    // deleteelement.on('click', function (event) {
+    //   grid.removeFilter(fullfilter, rule["filtercount"]);
+    //   grid.getFilterGroup(thegrid, fullfilter, true, thefilter, fullfilter);
+    //   thegrid.setGridParam({
+    //     postData: { filters: JSON.stringify(fullfilter) },
+    //     search: true
+    //   }).trigger('reloadGrid');
+    //   if (typeof extraSearchUpdate == 'function')
+    //     extraSearchUpdate(fullfilter);
+    //   grid.saveColumnConfiguration();
+    // });
+    // newexpression.append(deleteelement);
+
+      $(el).before(configbox);
+      // grid.handlerinstalled = true;
+    }
+  },
+
+  findOperandLabel(operand) {
+    // Find operator
+    if (operand == "win")
+      oper = gettext("within");
+    else if (operand == "ico")
+      oper = gettext("is child of");
+    else if (operand == "isnull")
+      oper = gettext("is null");
+    else {
+      for (var firstKey in $.jgrid.locales)
+        var operands = $.jgrid.locales[firstKey].search.odata;
+      for (i = 0; i < operands.length; i++){
+        if (operands[i].oper == operand) {
+          oper = operands[i].text;
+          break;
+        }}
+      if (oper == undefined)
+        oper = operand;
+    }
+    return gettext(oper)
   },
 
   keyDownSearch: function () {
@@ -1747,57 +1859,57 @@ var grid = {
       return;
 
     // Find operator
-    if (rule.op == "win")
-      oper = gettext("within");
-    else if (rule.op == "ico")
-      oper = gettext("is child of");
-    else if (rule.op == "isnull")
-      oper = gettext("is null");
-    else {
-      for (var firstKey in $.jgrid.locales)
-        var operands = $.jgrid.locales[firstKey].search.odata;
-      for (i = 0; i < operands.length; i++)
-        if (operands[i].oper == rule.op) {
-          oper = operands[i].text;
-          break;
-        }
-      if (oper == undefined)
-        oper = rule.op;
-    }
+    oper = grid.findOperandLabel(rule.op);
 
     // Final result
-    var newexpression = $('<span class="badge">' + col.label + '&nbsp;' + oper + '&nbsp;</span>');
-    var newelement = $('<input class="form-control" size="10">');
+    var newspan = $('<span colname=' + col.name + ' style="cursor: pointer;"><i class="fa fa-filter"></i>' + '&nbsp;&nbsp;' + col.label + '&nbsp;' + oper + '&nbsp;</span>');
+    newspan.on('click', (event) => grid.showFilterOperandsList(event));
+    var newexpression = $('<span class="badge"></span>');
+    newexpression.append(newspan);
+    var newelement = $('<input class="form-control" style="width: 4ch;">');
     rule["filtercount"] = grid.countFilters++;  // Mark position in the expression
     newelement.val(rule.data);
-    newelement.on('change', function (event) {
-      grid.updateFilter(fullfilter, rule["filtercount"], $(event.target).val());
-      thegrid.setGridParam({
-        postData: { filters: JSON.stringify(fullfilter) },
-        search: true
-      }).trigger('reloadGrid');
-      if (typeof extraSearchUpdate == 'function')
-        extraSearchUpdate(fullfilter);
-      grid.saveColumnConfiguration();
+    newelement.attr("style", "width: " + (rule.data.length + 4) + "ch;");
+    newelement.on({
+      input: function(event){
+        this.style.width = (this.value.length + 4) + 'ch';
+      },
+      mouseenter: function(event){
+        console.log("mouse enter", event);
+        grid.showFilterConfig(event);
+      },
+      change: function(event){
+        grid.updateFilter(fullfilter, rule["filtercount"], $(event.target).val());
+        thegrid.setGridParam({
+          postData: { filters: JSON.stringify(fullfilter) },
+          search: true
+        }).trigger('reloadGrid');
+        if (typeof extraSearchUpdate == 'function')
+          extraSearchUpdate(fullfilter);
+        grid.saveColumnConfiguration();
+      },
+      click: function(){
+        $(this).css("background-color", "yellow");
+      }
     });
     newexpression.append(newelement);
     newexpression.append('&nbsp;');
     if (rule.op == "win")
       // Special case for the "within N days" operator
       newexpression.append(gettext("days") + '&nbsp;');
-    var deleteelement = $('<span class="fa fa-times"/>');
-    deleteelement.on('click', function (event) {
-      grid.removeFilter(fullfilter, rule["filtercount"]);
-      grid.getFilterGroup(thegrid, fullfilter, true, thefilter, fullfilter);
-      thegrid.setGridParam({
-        postData: { filters: JSON.stringify(fullfilter) },
-        search: true
-      }).trigger('reloadGrid');
-      if (typeof extraSearchUpdate == 'function')
-        extraSearchUpdate(fullfilter);
-      grid.saveColumnConfiguration();
-    });
-    newexpression.append(deleteelement);
+    // var deleteelement = $('<span class="fa fa-times"/>');
+    // deleteelement.on('click', function (event) {
+    //   grid.removeFilter(fullfilter, rule["filtercount"]);
+    //   grid.getFilterGroup(thegrid, fullfilter, true, thefilter, fullfilter);
+    //   thegrid.setGridParam({
+    //     postData: { filters: JSON.stringify(fullfilter) },
+    //     search: true
+    //   }).trigger('reloadGrid');
+    //   if (typeof extraSearchUpdate == 'function')
+    //     extraSearchUpdate(fullfilter);
+    //   grid.saveColumnConfiguration();
+    // });
+    // newexpression.append(deleteelement);
     thefilter.append(newexpression);
   },
 
@@ -2247,7 +2359,7 @@ var ERPconnection = {
       var r = grid.jqGrid('getRowData', sel[i]);
       if (r.type === undefined)
         r.type = transactiontype;
-      if (['proposed', 'approved', 'confirmed'].includes(r.status))
+      if (['proposed', 'approved', 'confirmed'].includes(r.status || r.operationplan__status))
         data.push(r);
     }
     if (data == [])
@@ -2257,6 +2369,113 @@ var ERPconnection = {
     hideModal('timebuckets');
     $.jgrid.hideModal("#searchmodfbox_grid");
     $('#popup').html('<div class="modal-dialog">' +
+      '<div class="modal-content">' +
+      '<div class="modal-header">' +
+      '<h5 class="modal-title text-capitalize">' + gettext("Export") + '</h5>' +
+      '<button type="button" class="btn-close" data-bs-dismiss="modal"></button>' +
+      '</div>' +
+      '<div class="modal-body pb-0">' +
+      '<p>' + gettext("Export selected records?") + '</p>' +
+      '</div>' +
+      '<div class="modal-footer justify-content-between">' +
+      '<input type="submit" id="cancelbutton" role="button" class="btn btn-gray text-capitalize" data-bs-dismiss="modal" value="' + gettext('Cancel') + '">' +
+      '<input type="submit" id="button_export" role="button" class="btn btn-primary text-capitalize" value="' + gettext('Confirm') + '">' +
+      '</div>' +
+      '</div>' +
+      '</div>');
+    showModal('popup');
+    document.getElementById('popup').addEventListener('hidden.bs.modal', event => {
+      $("#noactionselected").prop("selected", true);
+    }, { once: true });
+
+    $('#button_export').on('click', function () {
+      if ($('#button_export').val() === gettext('Close')) {
+        hideModal('popup');
+        return;
+      }
+      var tmp = gettext('connecting');
+      $('#popup .modal-body p').html(String(tmp).charAt(0).toUpperCase() + String(tmp).slice(1) + '...');
+      $.ajax({
+        url: url_prefix + "/erp/upload/",
+        data: JSON.stringify(data),
+        type: "POST",
+        contentType: "application/json",
+        success: function (data, stat, result) {
+          $('#cancelbutton').addClass("invisible");
+          $('#button_export').val(gettext('Close'));
+          if (result.status == 204) {
+            $('#popup .modal-title').html(gettext("Error"));
+            $('#popup .modal-header').addClass('bg-danger');
+            $('#popup .modal-body p').html(gettext("No valid records selected"));
+            return;
+          }
+          var rowdata = [];
+          // Mark selected rows as "approved" if the original status was "proposed".
+          $('#popup .modal-body p').html(gettext("Export successful"));
+
+          // update both cell value and grid data
+          for (var i in sel) {
+            var tp = grid.jqGrid('getCell', sel[i], 'operationplan__type');
+            if (!tp) tp = grid.jqGrid('getCell', sel[i], 'type');
+            var cur = grid.jqGrid('getCell', sel[i], 'operationplan__status');
+            if (cur === 'proposed' && !['STCK', 'DLVR'].includes(tp)) {
+              grid.jqGrid('setCell', sel[i], 'operationplan__status', 'approved');
+              rowdata = grid.jqGrid('getRowData', sel[i]);
+              rowdata.operationplan__status = 'approved';
+            }
+            else if (!cur) {
+              cur = grid.jqGrid('getCell', sel[i], 'operationplan__status');
+              if (cur === 'proposed' && !['STCK', 'DLVR'].includes(tp)) {
+                grid.jqGrid('setCell', sel[i], 'status', 'approved');
+                rowdata = grid.jqGrid('getRowData', sel[i]);
+                rowdata.status = 'approved';
+              }
+            }
+          };
+          grid.jqGrid('setRowData', rowdata);
+
+          if (typeof checkrows === 'function') {
+            checkrows(grid, sel);
+          }
+
+        },
+        error: function (result) {
+          if (result.status == 401) {
+            location.reload();
+            return;
+          }
+          $('#popup .modal-title').html(gettext("Error"));
+          $('#popup .modal-header').addClass('bg-danger');
+          $('#popup .modal-body p').html(result.responseText);
+          $('#button_export').val(gettext('retry'));
+        }
+      });
+    });
+    if ($("#actions").length)
+      $("#actions1 span").text($("#actionsul").children().first().text());
+  },
+
+
+  //  ----------------------------------------------------------------------------
+  //  Sales Orders dependencies export
+  //  ----------------------------------------------------------------------------
+  SODepExport: function (grid, transactiontype) {
+    // Collect all selected rows in the status 'proposed'
+    const sel = grid.jqGrid('getGridParam', 'selarrrow');
+    if (sel === null || sel.length == 0)
+      return;
+    const data = [];
+    for (let i in sel) {
+      let r = grid.jqGrid('getRowData', sel[i]);
+      if (r.type === undefined)
+        r.type = transactiontype;
+      data.push(r);
+    }
+    const formatNumber = window.grid.formatNumber;
+
+    hideModal('timebuckets');
+    $.jgrid.hideModal("#searchmodfbox_grid");
+    $('#popup').html('<div class="modal-dialog modal-xl">' +
       '<div class="modal-content">' +
       '<div class="modal-header">' +
       '<h5 class="modal-title text-capitalize">' + gettext("Export") + '</h5>' +
@@ -2276,55 +2495,272 @@ var ERPconnection = {
       $("#noactionselected").prop("selected", true);
     }, { once: true });
 
-    $('#button_export').on('click', function () {
-      var tmp = gettext('connecting');
-      $('#popup .modal-body p').html(String(tmp).charAt(0).toUpperCase() + String(tmp).slice(1) + '...');
-      $.ajax({
-        url: url_prefix + "/erp/upload/",
-        data: JSON.stringify(data),
-        type: "POST",
-        contentType: "application/json",
-        success: function () {
-          var rowdata = [];
-          // Mark selected rows as "approved" if the original status was "proposed".
-          $('#popup .modal-body p').html(gettext("Export successful"));
-          $('#cancelbutton').val(gettext('Close'));
-          $('#button_export').removeClass("btn-primary").prop('disabled', true);
+    // compose url
+    let components = '?demand=';
+    for (let i = 0; i < sel.length; i++) {
+      const r = grid.jqGrid('getRowData', sel[i]);
+      if (r.type === undefined)
+        r.type = transactiontype;
+      if (r.status == 'open' || r.status == 'proposed') {
+        if (i == 0) components += encodeURIComponent(sel[i]);
+        else components += '&demand=' + encodeURIComponent(sel[i]);
+      };
+    };
 
-          //update both cell value and grid data
-          for (var i in sel) {
-            var cur = grid.jqGrid('getCell', sel[i], 'status');
+    function formatValue(originalValue) {
+      if (originalValue[3] === 'number') {
+        return formatNumber(originalValue[1]);
+      } else if (originalValue[3] === 'text') {
+        return originalValue[1];
+      } else if (originalValue[3] === 'date') {
+        return moment(originalValue[1]).format(dateformat);
+      } else {
+        return originalValue[1];
+      }
+    }
 
-            if (cur === 'proposed') {
-              grid.jqGrid('setCell', sel[i], 'status', 'approved');
-              rowdata = grid.jqGrid('getRowData', sel[i]);
-              rowdata.status = 'approved';
-            }
-          };
-          grid.jqGrid('setRowData', rowdata);
+    //get demandplans
+    $.ajax({
+      url: url_prefix + "/demand/operationplans/" + components,
+      type: "GET",
+      contentType: "application/json",
+      success: function (data) {
+        // expected data format:
+        // data = {PO: [row0, row1, ...], MO: [row0, ...], DO: [row0, ...]};
+        // row = [[label0, value0, hidden], [label1, value1, hidden], ...];
 
-          if (typeof checkrows === 'function') {
-            checkrows(grid, sel);
-          }
-
-        },
-        error: function (result, stat, errorThrown) {
-          if (result.status == 401) {
-            location.reload();
-            return;
-          }
-          $('#popup .modal-title').html(gettext("Error"));
-          $('#popup .modal-header').addClass('bg-danger');
-          $('#popup .modal-body p').html(result.responseText);
-          $('#button_export').text(gettext('retry'));
+        if (data.PO.length === 0 && data.MO.length === 0 && data.DO.length === 0) {
+          $('#popup .modal-body').css({ 'overflow-y': 'auto' }).html('<div style="overflow-y:auto; height: 300px; resize: vertical">' +
+            gettext('There are no purchase, distribution or manufacturing orders for export that are linked to this sales order') +
+            '</div>');
+          $('#button_export').addClass("d-none");
+          return;
         }
+        $('#popup .modal-body').html(
+          '<div id="PO-title"><h5 class="text-capitalize">' + gettext("purchase orders") + '</h5></div>' +
+          '<div id="PO-data" class="table-responsive">' +
+          '<table class="table table-hover text-center" id="exporttable_PO">' +
+          '<thead class="thead-default">' +
+          '</thead>' +
+          '</table>' +
+          '</div>' +
+          '<div id="MO-title"><h5 class="text-capitalize">' + gettext("manufacturing orders") + '</h5></div>' +
+          '<div id="MO-data" class="table-responsive">' +
+          '<table class="table table-hover text-center" id="exporttable_MO">' +
+          '<thead class="thead-default">' +
+          '</thead>' +
+          '</table>' +
+          '</div>' +
+          '<div id="DO-title"><h5 class="text-capitalize">' + gettext("distribution orders") + '</h5></div>' +
+          '<div id="DO-data" class="table-responsive">' +
+          '<table class="table table-hover text-center" id="exporttable_DO">' +
+          '<thead class="thead-default">' +
+          '</thead>' +
+          '</table>' +
+          '</div>'
+        );
+
+        let labels = [];
+        let modal_table_row_index = 0;
+
+        for (const dataType of ['PO', 'DO', 'MO']) {
+          if (data[dataType].length === 0) {
+            $('#' + dataType + '-title, #' + dataType + '-data').addClass('d-none');
+            continue;
+          }
+          labels.length = 0;
+
+          let tableheadercontent = $('<tr/>');
+
+          tableheadercontent.append($('<th/>').html(
+            '<input id="cb_modaltableall_' + dataType + '" class="cbox" type="checkbox" aria-checked="true" checked>'
+          ));
+
+          labels.push(...data[dataType][0].map(x => x[0]));
+
+          for (const labelIndex in labels) {
+            // if not hidden
+            if (!data[dataType][0][labelIndex][2])
+              tableheadercontent.append($('<th/>').addClass('text-capitalize').text(labels[labelIndex]));
+          }
+          const tablebodycontent = $('<tbody/>');
+          for (let i = 0; i < data[dataType].length; i++) {
+            const row = $('<tr/>').attr('orderreference', data[dataType][i][0][1]).attr('ordertype', dataType);
+            const td = $('<td/>');
+
+            td.append($('<input/>').attr({
+              'id': "cb_modaltable_" + dataType + "-" + i,
+              'class': "cbox align-middle",
+              'type': "checkbox",
+              'aria-checked': "true",
+              'checked': "true"
+            }));
+            row.append(td);
+
+            for (let j = 0; j < labels.length; j++) {
+              if (!data[dataType][i][j][2]) {
+                if (data[dataType][i][j][0] == 'quantity') {
+                  row.append($('<td class="align-middle"/><input type="number" value="' + parseFloat(data[dataType][i][j][1]) + '" id="quantity' + modal_table_row_index + '"/>'));
+                } else if (data[dataType][i][j][0] === 'receipt date' || data[dataType][i][j][0] === 'end date') {
+                  row.append($('<td class="align-middle"/><input type="datetime-local" value="' + data[dataType][i][j][1] + '" title="due date" required="" id="due' + modal_table_row_index + '"></modal_table_row_indexnput>'));
+                } else if (data[dataType][i][j][0] == 'supplier') {
+                  row.append($('<td class="align-middle"/><input type="text" value="' + data[dataType][i][j][1] + '" title="supplier" required="" id="supplier' + modal_table_row_index + '"></input>'));
+                } else {
+                  row.append($('<td class="align-middle"/>').text(formatValue(data[dataType][i][j])));
+                }
+              }
+            };
+            tablebodycontent.append(row);
+            modal_table_row_index++;
+          }
+
+          $('#popup #exporttable_' + dataType).append(tablebodycontent);
+          $('#popup #exporttable_' + dataType + ' thead').append(tableheadercontent);
+
+          $("#cb_modaltableall_" + dataType).click(function () {
+            if ($("#cb_modaltableall_" + dataType).prop("checked")) {
+              $("#exporttable_" + dataType + " input[type=checkbox]").prop("checked", $(this).prop("checked"));
+            } else {
+              $("#exporttable_" + dataType + " tbody tr input:not(:checked)").prop("checked", true);
+              $("#exporttable_" + dataType + " tbody tr input:not(:checked)").parent().parent().removeClass("active").addClass("active")
+            }
+            $("#exporttable_" + dataType + " input[type=checkbox]").prop("checked", $(this).prop("checked"));
+            if ($("#popup .modal-body tbody input[type=checkbox]:checked").length > 0) {
+              $('#button_export').prop('disabled', false);;
+            } else {
+              $('#button_export').prop('disabled', true);
+            };
+          });
+          $("#exporttable_" + dataType + " tbody input[type=checkbox]").click(function () {
+            $(this).parent().parent().toggleClass('selected');
+            $("#cb_modaltableall_" + dataType).prop("checked", $("#exporttable_" + dataType + " tbody input[type=checkbox]:not(:checked)").length == 0);
+            if ($("#popup .modal-body tbody input[type=checkbox]:checked").length > 0) {
+              $('#button_export').prop('disabled', false);;
+            } else {
+              $('#button_export').prop('disabled', true);
+            };
+          });
+        }
+
+        $('#button_export').on('click', function () {
+          //get selected row data
+          const exportData = [];
+          let cells = [];
+          const cellsData = {};
+          const rows = $('#popup .modal-body tbody input[type=checkbox]:checked').parent().parent();
+
+          index = 0;
+          for (const row of rows) {
+            let date = '.modal-body #due' + index;
+            let quantity = '.modal-body #quantity' + index;
+            let supplier = '.modal-body #supplier' + index;
+
+            // Always send seconds even if they are 0
+            newDate = ($(date).val().length === 16) ? $(date).val() + ":00" : $(date).val();
+
+            exportData.push({
+              'reference': row.attributes.orderreference.value,
+              'type': row.getAttribute('ordertype'),
+              'quantity': Number($(quantity).val()),
+              'enddate':  newDate,
+              'supplier': $(supplier).val()
+            });
+            index++;
+          }
+
+          $('#popup .modal-body').html(gettext('connecting') + '...');
+          $.ajax({
+            url: url_prefix + "/erp/upload/",
+            data: JSON.stringify(exportData),
+            type: "POST",
+            contentType: "application/json",
+            success: function () {
+              $('#popup .modal-body').html(gettext("Export successful"));
+              $('#cancelbutton').val(gettext('Close'));
+              $('#button_export').prop('disabled', true);
+              // Mark selected rows as "approved" if the original status was "proposed".
+              for (var i in sel) {
+                const cur = grid.jqGrid('getCell', sel[i], 'status');
+                if (cur == 'proposed')
+                  grid.jqGrid('setCell', sel[i], 'status', 'approved');
+              };
+            },
+            error: function (result, stat, errorThrown) {
+              if (result.status == 401) {
+                location.reload();
+                return;
+              }
+              $('#popup .modal-title').html(gettext("Error during export"));
+              $('#popup .modal-header').addClass('bg-danger');
+              $('#popup .modal-body').css({ 'overflow-y': 'auto' }).html('<div style="overflow-y:auto; height: 300px; resize: vertical">' + result.responseText + '</div>');
+              $('#button_export').val(gettext('Retry'));
+              $('#popup .modal-dialog').css({ 'visibility': 'visible' })
+              $('#popup').modal('show');
+            }
+          });
+        });
+
+
+        if ($("#actions").length)
+          $("#actions1 span").text($("#actionsul").children().first().text());
+        if ($("#DRPactions").length)
+          $("#DRPactions1 span").text($("#DRPactionsul").children().first().text());
+      },
+      error: function (result, stat, errorThrown) {
+        if (result.status == 401) {
+          location.reload();
+          return;
+        }
+        $('#popup .modal-title').html(gettext("Error"));
+        $('#popup .modal-header').addClass('bg-danger');
+        $('#popup .modal-body').css({ 'overflow-y': 'auto' }).html('<div style="overflow-y:auto; height: 300px; resize: vertical">' + result.responseText + '</div>');
+        $('#button_export').val(gettext('Retry'));
+        $('#popup .modal-dialog').css({ 'visibility': 'visible' })
+        $('#popup').modal('show');
+      }
+    });
+
+  }
+} //end Code for ERP integration
+
+
+//----------------------------------------------------------------------------
+// Code for reorderable widgets.
+//----------------------------------------------------------------------------
+
+var widget = {
+  init: function (callback) {
+    $(".widget-list").each(function () {
+      Sortable.create($(this)[0], {
+        group: "widgets",
+        handle: ".widget-handle",
+        animation: 100,
+        onEnd: callback
       });
     });
-    if ($("#actions").length)
-      $("#actions1 span").text($("#actionsul").children().first().text());
   },
 
-} //end Code for ERP integration
+  getConfig: function() {
+    var rows = [];
+    $(".widget-list").each(function () {
+      var row = {
+        "name": $(this).attr("data-widget") || "",
+        "cols": [{"width": $(this).attr("data-widget-width") || 12, "widgets": [] }]
+      };
+
+      $(this).find(".widget").each(function () {
+        row["cols"][0]["widgets"].push([
+          $(this).attr("data-widget") || "",
+          {
+            "collapsed": $(this).find(".collapse.show").length == 0
+          }
+        ]);
+      });
+      rows.push(row);
+    });
+    return rows;
+  }
+};
 
 //----------------------------------------------------------------------------
 // Code for sending dashboard configuration to the server.

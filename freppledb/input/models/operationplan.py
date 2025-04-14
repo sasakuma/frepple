@@ -124,6 +124,13 @@ class OperationPlan(AuditModel):
     enddate = models.DateTimeField(
         _("end date"), help_text=_("end date"), null=True, blank=True, db_index=True
     )
+    remark = models.CharField(
+        _("remark"),
+        null=True,
+        blank=True,
+        max_length=300,
+        help_text=_("remark"),
+    )
     criticality = models.DecimalField(
         _("criticality"),
         max_digits=20,
@@ -810,7 +817,15 @@ class ManufacturingOrder(OperationPlan):
     objects = ManufacturingOrderManager()
 
     @staticmethod
-    def parseData(data, rowmapper, user, database, ping, excel_duration_in_days=False):
+    def parseData(
+        data,
+        rowmapper,
+        user,
+        database,
+        ping,
+        excel_duration_in_days=False,
+        skip_audit_log=False,
+    ):
         selfReferencing = []
 
         def formfieldCallback(f):
@@ -1086,7 +1101,7 @@ class ManufacturingOrder(OperationPlan):
                                 for x in selfReferencing:
                                     if x.cache is not None and obj.pk not in x.cache:
                                         x.cache[obj.pk] = obj
-                            if user:
+                            if not skip_audit_log and user:
                                 if it:
                                     Comment(
                                         user_id=user.id,

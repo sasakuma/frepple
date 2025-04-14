@@ -21,13 +21,14 @@
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from django.db import DEFAULT_DB_ALIAS, connections
 from django.core.management.base import BaseCommand
 
 from freppledb import __version__
 from freppledb.archive.models import ArchiveManager
+from freppledb.common.models import Parameter
 from freppledb.common.report import getCurrentDate
 
 
@@ -57,8 +58,18 @@ class Command(BaseCommand):
     def handle(self, **options):
         database = options["database"]
         verbosity = int(options["verbosity"])
+
+        # Delete archived data we don't need any longer
+        p = int(Parameter.getValue("archive.duration", database, "365"))
+        now = getCurrentDate(database)
+        for a in ArchiveManager.objects.using(database).filter(
+            snapshot_date__lt=now - timedelta(days=p)
+        ):
+            print(f"Deleting history archive with snapshot {a.snapshot_date}")
+            a.delete()
+
+        # create a new snapshot
         with connections[database].cursor() as cursor:
-            now = getCurrentDate(database)
 
             # Check the archiving frequency
             cursor.execute(
@@ -220,5 +231,3 @@ class Command(BaseCommand):
             mgr.operationplan_records = operationplan_records
             mgr.total_records = buffer_records + demand_records + operationplan_records
             mgr.save(using=database)
-
-            # TODO Deleted archived data we don't need to any longer

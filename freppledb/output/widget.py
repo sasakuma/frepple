@@ -34,7 +34,6 @@ from django.utils.html import escape
 from django.utils.text import capfirst
 from django.utils.translation import gettext_lazy as _
 
-from freppledb.common.middleware import _thread_locals
 from freppledb.common.dashboard import Dashboard, Widget
 from freppledb.common.report import GridReport, getCurrency, getCurrentDate
 from freppledb.input.models import (
@@ -70,13 +69,9 @@ class LateOrdersWidget(Widget):
         return "?%s" % urlencode({"limit": self.limit})
 
     @classmethod
-    def render(cls, request=None):
+    def render(cls, request):
         limit = int(request.GET.get("limit", cls.limit))
-        try:
-            db = _thread_locals.request.database or DEFAULT_DB_ALIAS
-        except Exception:
-            db = DEFAULT_DB_ALIAS
-        cursor = connections[db].cursor()
+        cursor = connections[request.database].cursor()
         result = [
             '<div class="table-responsive"><table class="table table-sm table-hover">',
             '<thead><tr><th class="alignleft">%s</th><th class="alignleft">%s</th>'
@@ -159,52 +154,48 @@ class ShortOrdersWidget(Widget):
         return "?%s" % urlencode({"limit": self.limit})
 
     @classmethod
-    def render(cls, request=None):
-        limit = int(request.GET.get("limit", cls.limit))
-        try:
-            db = _thread_locals.request.database or DEFAULT_DB_ALIAS
-        except Exception:
-            db = DEFAULT_DB_ALIAS
-        cursor = connections[db].cursor()
-        result = [
-            '<div class="table-responsive"><table class="table table-sm table-hover">',
-            '<thead><tr><th class="alignleft">%s</th><th class="alignleft">%s</th><th class="alignleft">%s</th>'
-            '<th class="alignleft">%s</th><th class="text-center">%s</th><th class="text-center">%s</th></tr></thead>'
-            % (
-                capfirst(force_str(_("name"))),
-                capfirst(force_str(_("item"))),
-                capfirst(force_str(_("location"))),
-                capfirst(force_str(_("customer"))),
-                capfirst(force_str(_("due"))),
-                capfirst(force_str(_("short"))),
-            ),
-        ]
-        alt = False
-        cursor.execute(cls.query, (limit,))
-        for rec in cursor.fetchall():
-            result.append(
-                '<tr%s><td class="text-decoration-underline alignleft"><a href="%s/demandpegging/%s/">%s</a></td><td class="alignleft">%s</td>'
-                '<td class="alignleft">%s</td><td class="alignleft">%s</td><td class="text-center">%s</td>'
-                '<td class="text-center">%s</td></tr>'
+    def render(cls, request):
+        with connections[request.database].cursor() as cursor:
+            limit = int(request.GET.get("limit", cls.limit))
+            result = [
+                '<div class="table-responsive"><table class="table table-sm table-hover">',
+                '<thead><tr><th class="alignleft">%s</th><th class="alignleft">%s</th><th class="alignleft">%s</th>'
+                '<th class="alignleft">%s</th><th class="text-center">%s</th><th class="text-center">%s</th></tr></thead>'
                 % (
-                    alt and ' class="altRow"' or "",
-                    request.prefix,
-                    quote(rec[0]),
-                    escape(rec[0]),
-                    escape(rec[1]),
-                    escape(rec[2]),
-                    escape(rec[3]),
-                    (
-                        date_format(rec[4], format="DATE_FORMAT", use_l10n=False)
-                        if rec[4]
-                        else ""
-                    ),
-                    int(rec[5]),
+                    capfirst(force_str(_("name"))),
+                    capfirst(force_str(_("item"))),
+                    capfirst(force_str(_("location"))),
+                    capfirst(force_str(_("customer"))),
+                    capfirst(force_str(_("due"))),
+                    capfirst(force_str(_("short"))),
+                ),
+            ]
+            alt = False
+            cursor.execute(cls.query, (limit,))
+            for rec in cursor.fetchall():
+                result.append(
+                    '<tr%s><td class="text-decoration-underline alignleft"><a href="%s/demandpegging/%s/">%s</a></td><td class="alignleft">%s</td>'
+                    '<td class="alignleft">%s</td><td class="alignleft">%s</td><td class="text-center">%s</td>'
+                    '<td class="text-center">%s</td></tr>'
+                    % (
+                        alt and ' class="altRow"' or "",
+                        request.prefix,
+                        quote(rec[0]),
+                        escape(rec[0]),
+                        escape(rec[1]),
+                        escape(rec[2]),
+                        escape(rec[3]),
+                        (
+                            date_format(rec[4], format="DATE_FORMAT", use_l10n=False)
+                            if rec[4]
+                            else ""
+                        ),
+                        int(rec[5]),
+                    )
                 )
-            )
-            alt = not alt
-        result.append("</table></div>")
-        return HttpResponse("\n".join(result))
+                alt = not alt
+            result.append("</table></div>")
+            return HttpResponse("\n".join(result))
 
 
 Dashboard.register(ShortOrdersWidget)
@@ -263,17 +254,22 @@ class ManufacturingOrderWidget(Widget):
 
     var margin_x = 9*max_length;  // Height allocated for the X-axis depends on x-axis titles
 
-    // List of groups
-    var allGroup = ["value", "unit"]
+    const dropDownButton = document.querySelector('#mo_selectButton span');
+    const options = document.querySelectorAll('#moul li a');
 
-    // add the options to the button
-    d3.select("#mo_selectButton")
-      .selectAll('myOptions')
-     	.data(allGroup)
-      .enter()
-    	.append('option')
-      .text(function (d) { return d; }) // text showed in the menu
-      .attr("value", function (d) { return d; }) // corresponding value returned by the button
+    for (const option of options) {
+      option.addEventListener('click', event => {
+        dropDownButton.textContent = event.target.textContent;
+
+        // recover the option that has been chosen
+        var selectedOption = event.target.textContent;
+        // run the updateChart function with this selected option
+
+        d3.selectAll('#mo_yaxis').remove();
+        d3.selectAll('#mo_bar').remove();
+        draw();
+      });
+    }
 
     // Define axis domains
     var x = d3.scale.ordinal()
@@ -304,11 +300,10 @@ class ManufacturingOrderWidget(Widget):
     }
 
     function draw() {
+        const selectButtonValue = document.querySelector('#mo_selectButton span').textContent;
         var y_value = d3.scale.linear()
-      .range([svgrectangle['height'] - margin_x - 10, 0])
-      .domain([0,
-       (d3.select("#mo_selectButton").property("value") == "value" ? max_value:max_units)
-         + 5]);
+        .range([svgrectangle['height'] - margin_x - 10, 0])
+        .domain([0, (selectButtonValue == "value" ? max_value:max_units) + 5]);
 
         // Draw y-axis
         var yAxis = d3.svg.axis().scale(y_value)
@@ -330,9 +325,9 @@ class ManufacturingOrderWidget(Widget):
         .attr("id","mo_bar")
         .attr("x",function(d, i) {return tickposition + i*x.rangeBand() - x.rangeBand()/2 + margin_y;})
         .attr("y",function(d, i) {return svgrectangle['height'] - margin_x - (y_value(0) -
-        (d3.select("#mo_selectButton").property("value") == "value" ? y_value(d[3]):y_value(d[2])));})
+        (selectButtonValue == "value" ? y_value(d[3]):y_value(d[2])));})
         .attr("height", function(d, i) {return y_value(0) -
-        (d3.select("#mo_selectButton").property("value") == "value" ? y_value(d[3]):y_value(d[2]));})
+        (selectButtonValue == "value" ? y_value(d[3]):y_value(d[2]));})
         .attr("width", x.rangeBand())
         .attr('fill', '#828915')
         .on("mouseover", function(d) {
@@ -356,30 +351,18 @@ class ManufacturingOrderWidget(Widget):
     }
     draw();
 
-    // When the button is changed, update data and redraw()
-    d3.select("#mo_selectButton").on("change", function(d) {
-        d3.selectAll('#mo_yaxis').remove();
-        d3.selectAll('#mo_bar').remove();
-        draw();
-    })
-
     """ % force_str(
         _("units")
     )
 
     @classmethod
-    def render(cls, request=None):
+    def render(cls, request):
         fence1 = int(request.GET.get("fence1", cls.fence1))
         fence2 = int(request.GET.get("fence2", cls.fence2))
         currency = getCurrency()
-        try:
-            db = _thread_locals.request.database or DEFAULT_DB_ALIAS
-        except Exception:
-            db = DEFAULT_DB_ALIAS
-        current = getCurrentDate(db, lastplan=True)
-        request.database = db
+        current = getCurrentDate(request.database, lastplan=True)
         GridReport.getBuckets(request)
-        cursor = connections[db].cursor()
+        cursor = connections[request.database].cursor()
         query = """
           select
             0, common_bucketdetail.name, common_bucketdetail.startdate,
@@ -452,8 +435,16 @@ class ManufacturingOrderWidget(Widget):
             ),
         )
         result = [
-            '<select class="form-select form-select-sm d-inline-block w-auto" id="mo_selectButton"></select>',
-            '<svg class="chart  mb-2" id="mo_chart" style="width:100%; height: 170px;"></svg>',
+            '<div class="dropdown">',
+            '<button id="mo_selectButton" class="form-select form-select-sm d-inline-block w-auto text-capitalize" type="button" data-bs-toggle="dropdown" aria-expanded="false">',
+            "<span>value</span>",
+            "</button>",
+            '<ul id="moul" class="dropdown-menu w-auto" style="min-width: unset" aria-labelledby="mo_selectButton">',
+            '<li><a class="dropdown-item text-capitalize">value</a></li>',
+            '<li><a class="dropdown-item text-capitalize">unit</a></li>',
+            "</ul>",
+            "</div>",
+            '<svg class="chart mb-2" id="mo_chart" style="width:100%; height: 170px;"></svg>',
             '<table id="mo_overview" style="display: none">',
         ]
         for rec in cursor.fetchall():
@@ -579,18 +570,22 @@ class DistributionOrderWidget(Widget):
 
     var margin_x = 9*max_length;  // Height allocated for the X-axis depends on x-axis titles
 
-    // List of groups
-    var allGroup = ["value", "unit"]
+    const dropDownButton = document.querySelector('#do_selectButton span');
+    const options = document.querySelectorAll('#doul li a');
 
-    // add the options to the button
-    d3.select("#do_selectButton")
-      .selectAll('myOptions')
-     	.data(allGroup)
-      .enter()
-    	.append('option')
-      .text(function (d) { return d; }) // text showed in the menu
-      .attr("value", function (d) { return d; }) // corresponding value returned by the button
+    for (const option of options) {
+      option.addEventListener('click', event => {
+        dropDownButton.textContent = event.target.textContent;
 
+        // recover the option that has been chosen
+        var selectedOption = event.target.textContent;
+        // run the updateChart function with this selected option
+
+        d3.selectAll('#do_yaxis').remove();
+        d3.selectAll('#do_bar').remove();
+        draw();
+      });
+    }
 
     // Define axis domains
     var x = d3.scale.ordinal()
@@ -623,10 +618,11 @@ class DistributionOrderWidget(Widget):
     }
 
     function draw() {
+        const selectButtonValue = document.querySelector('#do_selectButton span').textContent;
         var y_value = d3.scale.linear()
          .range([svgrectangle['height'] - margin_x - 10, 0])
          .domain([0,
-         (d3.select("#do_selectButton").property("value") == "value" ? max_value:max_units)
+         (selectButtonValue == "value" ? max_value:max_units)
          + 5]);
 
         // Draw y-axis
@@ -649,10 +645,10 @@ class DistributionOrderWidget(Widget):
         .attr("id","do_bar")
         .attr("x",function(d, i) {return tickposition + i*x.rangeBand() - x.rangeBand()/2 + margin_y;})
         .attr("y",function(d, i) {return svgrectangle['height'] - margin_x - (y_value(0) -
-        (d3.select("#do_selectButton").property("value") == "value" ? y_value(d[3]):y_value(d[2]))
+        (selectButtonValue == "value" ? y_value(d[3]):y_value(d[2]))
         );})
         .attr("height", function(d, i) {return y_value(0) -
-        (d3.select("#do_selectButton").property("value") == "value" ? y_value(d[3]):y_value(d[2]))
+        (selectButtonValue == "value" ? y_value(d[3]):y_value(d[2]))
         ;})
         .attr("width", x.rangeBand())
         .attr('fill', '#828915')
@@ -677,30 +673,18 @@ class DistributionOrderWidget(Widget):
     }
     draw();
 
-    // When the button is changed, update data and redraw()
-    d3.select("#do_selectButton").on("change", function(d) {
-        d3.selectAll('#do_yaxis').remove();
-        d3.selectAll('#do_bar').remove();
-        draw();
-    })
-
     """ % force_str(
         _("units")
     )
 
     @classmethod
-    def render(cls, request=None):
+    def render(cls, request):
         fence1 = int(request.GET.get("fence1", cls.fence1))
         fence2 = int(request.GET.get("fence2", cls.fence2))
         currency = getCurrency()
-        try:
-            db = _thread_locals.request.database or DEFAULT_DB_ALIAS
-        except Exception:
-            db = DEFAULT_DB_ALIAS
-        current = getCurrentDate(db, lastplan=True)
-        request.database = db
+        current = getCurrentDate(request.database, lastplan=True)
         GridReport.getBuckets(request)
-        cursor = connections[db].cursor()
+        cursor = connections[request.database].cursor()
         query = """
       select
          0, common_bucketdetail.name, common_bucketdetail.startdate,
@@ -768,7 +752,15 @@ class DistributionOrderWidget(Widget):
             ),
         )
         result = [
-            '<select class="form-select form-select-sm d-inline-block w-auto" id="do_selectButton"></select>',
+            '<div class="dropdown">',
+            '<button id="do_selectButton" class="form-select form-select-sm d-inline-block w-auto text-capitalize" type="button" data-bs-toggle="dropdown" aria-expanded="false">',
+            "<span>value</span>",
+            "</button>",
+            '<ul id="doul" class="dropdown-menu w-auto" style="min-width: unset" aria-labelledby="do_selectButton">',
+            '<li><a class="dropdown-item text-capitalize">value</a></li>',
+            '<li><a class="dropdown-item text-capitalize">unit</a></li>',
+            "</ul>",
+            "</div>",
             '<svg class="chart mb-2" id="do_chart" style="width:100%; height: 170px;"></svg>',
             '<table id="do_overview" style="display: none">',
         ]
@@ -904,17 +896,22 @@ class PurchaseOrderWidget(Widget):
 
     var margin_x = 9*max_length;  // Height allocated for the X-axis depends on x-axis titles
 
-    // List of groups
-    var allGroup = ["value", "unit"]
+    const dropDownButton = document.querySelector('#po_selectButton span');
+    const options = document.querySelectorAll('#poul li a');
 
-    // add the options to the button
-    d3.select("#po_selectButton")
-      .selectAll('myOptions')
-     	.data(allGroup)
-      .enter()
-    	.append('option')
-      .text(function (d) { return d; }) // text showed in the menu
-      .attr("value", function (d) { return d; }) // corresponding value returned by the button
+    for (const option of options) {
+      option.addEventListener('click', event => {
+        dropDownButton.textContent = event.target.textContent;
+
+        // recover the option that has been chosen
+        var selectedOption = event.target.textContent;
+        // run the updateChart function with this selected option
+
+        d3.selectAll('#po_yaxis').remove();
+        d3.selectAll('#po_bar').remove();
+        draw();
+      });
+    }
 
     // Define axis domains
     var x = d3.scale.ordinal()
@@ -945,12 +942,10 @@ class PurchaseOrderWidget(Widget):
     }
 
     function draw() {
-
+        const selectButtonValue = document.querySelector('#po_selectButton span').textContent;
         var y_value = d3.scale.linear()
         .range([svgrectangle['height'] - margin_x - 10, 0])
-        .domain([0,
-         (d3.select("#po_selectButton").property("value") == "value" ? max_value:max_units)
-           + 5]);
+        .domain([0, (selectButtonValue == "value" ? max_value:max_units) + 5]);
 
         // Draw y-axis
          var yAxis = d3.svg.axis().scale(y_value)
@@ -972,10 +967,10 @@ class PurchaseOrderWidget(Widget):
         .attr("id","po_bar")
         .attr("x",function(d, i) {return tickposition + i*x.rangeBand() - x.rangeBand()/2 + margin_y;})
         .attr("y",function(d, i) {return svgrectangle['height'] - margin_x - (y_value(0) -
-        (d3.select("#po_selectButton").property("value") == "value" ? y_value(d[3]):y_value(d[2]))
+        (selectButtonValue == "value" ? y_value(d[3]):y_value(d[2]))
         );})
         .attr("height", function(d, i) {return y_value(0) -
-        (d3.select("#po_selectButton").property("value") == "value" ? y_value(d[3]):y_value(d[2]))
+        (selectButtonValue == "value" ? y_value(d[3]):y_value(d[2]))
         ;})
         .attr("width", x.rangeBand())
         .attr('fill', '#828915')
@@ -999,33 +994,20 @@ class PurchaseOrderWidget(Widget):
                 });
     }
     draw();
-
-    // When the button is changed, update data and redraw()
-    d3.select("#po_selectButton").on("change", function(d) {
-        d3.selectAll('#po_yaxis').remove();
-        d3.selectAll('#po_bar').remove();
-        draw();
-    })
-
     """ % force_str(
         _("units")
     )
 
     @classmethod
-    def render(cls, request=None):
+    def render(cls, request):
         fence1 = int(request.GET.get("fence1", cls.fence1))
         fence2 = int(request.GET.get("fence2", cls.fence2))
         supplier = request.GET.get("supplier", cls.supplier)
         currency = getCurrency()
-        try:
-            db = _thread_locals.request.database or DEFAULT_DB_ALIAS
-        except Exception:
-            db = DEFAULT_DB_ALIAS
-        current = getCurrentDate(db, lastplan=True)
-        request.database = db
+        current = getCurrentDate(request.database, lastplan=True)
         GridReport.getBuckets(request)
         supplierfilter = "and supplier_id = %s" if supplier else ""
-        cursor = connections[db].cursor()
+        cursor = connections[request.database].cursor()
         query = """
       select
          0, common_bucketdetail.name, common_bucketdetail.startdate,
@@ -1150,7 +1132,15 @@ class PurchaseOrderWidget(Widget):
                 ),
             )
         result = [
-            '<select class="form-select form-select-sm d-inline-block w-auto" id="po_selectButton"></select>',
+            '<div class="dropdown">',
+            '<button id="po_selectButton" class="form-select form-select-sm d-inline-block w-auto text-capitalize" type="button" data-bs-toggle="dropdown" aria-expanded="false">',
+            "<span>value</span>",
+            "</button>",
+            '<ul id="poul" class="dropdown-menu w-auto" style="min-width: unset" aria-labelledby="po_selectButton">',
+            '<li><a class="dropdown-item text-capitalize">value</a></li>',
+            '<li><a class="dropdown-item text-capitalize">unit</a></li>',
+            "</ul>",
+            "</div>",
             '<svg class="chart mb-2" id="po_chart" style="width:100%; height: 170px;"></svg>',
             '<table id="po_overview" style="display: none">',
         ]
@@ -1254,12 +1244,8 @@ class PurchaseQueueWidget(Widget):
         return "?%s" % urlencode({"limit": self.limit})
 
     @classmethod
-    def render(cls, request=None):
+    def render(cls, request):
         limit = int(request.GET.get("limit", cls.limit))
-        try:
-            db = _thread_locals.request.database or DEFAULT_DB_ALIAS
-        except Exception:
-            db = DEFAULT_DB_ALIAS
         result = [
             '<div class="table-responsive"><table class="table table-sm table-hover">',
             '<thead><tr><th class="alignleft">%s</th><th class="text-center">%s</th><th class="text-center">%s</th><th class="text-center">%s</th><th class="text-center">%s</th></tr></thead>'
@@ -1273,7 +1259,7 @@ class PurchaseQueueWidget(Widget):
         ]
         alt = False
         for po in (
-            PurchaseOrder.objects.using(db)
+            PurchaseOrder.objects.using(request.database)
             .filter(status="proposed")
             .order_by("startdate")[:limit]
         ):
@@ -1314,12 +1300,8 @@ class DistributionQueueWidget(Widget):
         return "?%s" % urlencode({"limit": self.limit})
 
     @classmethod
-    def render(cls, request=None):
+    def render(cls, request):
         limit = int(request.GET.get("limit", cls.limit))
-        try:
-            db = _thread_locals.request.database or DEFAULT_DB_ALIAS
-        except Exception:
-            db = DEFAULT_DB_ALIAS
         result = [
             '<div class="table-responsive"><table class="table table-sm table-hover">',
             '<thead><tr><th class="alignleft">%s</th><th class="text-center">%s</th><th class="text-center">%s</th><th class="text-center">%s</th><th class="text-center">%s</th><th class="text-center">%s</th></tr></thead>'
@@ -1334,7 +1316,7 @@ class DistributionQueueWidget(Widget):
         ]
         alt = False
         for po in (
-            DistributionOrder.objects.using(db)
+            DistributionOrder.objects.using(request.database)
             .filter(status="proposed")
             .order_by("startdate")[:limit]
         ):
@@ -1376,12 +1358,8 @@ class ShippingQueueWidget(Widget):
         return "?%s" % urlencode({"limit": self.limit})
 
     @classmethod
-    def render(cls, request=None):
+    def render(cls, request):
         limit = int(request.GET.get("limit", cls.limit))
-        try:
-            db = _thread_locals.request.database or DEFAULT_DB_ALIAS
-        except Exception:
-            db = DEFAULT_DB_ALIAS
         result = [
             '<div class="table-responsive"><table class="table table-sm table-hover">',
             '<thead><tr><th class="alignleft">%s</th><th>%s</th><th>%s</th><th class="text-center">%s</th><th class="text-center">%s</th><th class="text-center">%s</th></tr></thead>'
@@ -1396,7 +1374,7 @@ class ShippingQueueWidget(Widget):
         ]
         alt = False
         for do in (
-            DistributionOrder.objects.using(db)
+            DistributionOrder.objects.using(request.database)
             .filter(status="proposed")
             .order_by("startdate")[:limit]
         ):
@@ -1438,12 +1416,8 @@ class ResourceQueueWidget(Widget):
         return "?%s" % urlencode({"limit": self.limit})
 
     @classmethod
-    def render(cls, request=None):
+    def render(cls, request):
         limit = int(request.GET.get("limit", cls.limit))
-        try:
-            db = _thread_locals.request.database or DEFAULT_DB_ALIAS
-        except Exception:
-            db = DEFAULT_DB_ALIAS
         result = [
             '<div class="table-responsive"><table class="table table-sm table-hover">',
             "<thead><tr>"
@@ -1462,7 +1436,7 @@ class ResourceQueueWidget(Widget):
         ]
         alt = False
         for ldplan in (
-            OperationPlanResource.objects.using(db)
+            OperationPlanResource.objects.using(request.database)
             .select_related()
             .order_by("operationplan__startdate")[:limit]
         ):
@@ -1514,12 +1488,8 @@ class PurchaseAnalysisWidget(Widget):
     limit = 20
 
     @classmethod
-    def render(cls, request=None):
+    def render(cls, request):
         limit = int(request.GET.get("limit", cls.limit))
-        try:
-            db = _thread_locals.request.database or DEFAULT_DB_ALIAS
-        except Exception:
-            db = DEFAULT_DB_ALIAS
         result = [
             '<div class="table-responsive"><table class="table table-sm table-hover">',
             '<thead><tr><th class="alignleft">%s</th><th class="text-center">%s</th><th class="text-center">%s</th><th class="text-center">%s</th><th class="text-center">%s</th></tr></thead>'
@@ -1533,7 +1503,7 @@ class PurchaseAnalysisWidget(Widget):
         ]
         alt = False
         for po in (
-            PurchaseOrder.objects.using(db)
+            PurchaseOrder.objects.using(request.database)
             .filter(status="confirmed")
             .exclude(criticality=999)
             .order_by("color", "enddate")[:limit]
@@ -1571,12 +1541,8 @@ class AlertsWidget(Widget):
     entities = "material,capacity,demand,operation"
 
     @classmethod
-    def render(cls, request=None):
+    def render(cls, request):
         entities = request.GET.get("entities", cls.entities).split(",")
-        try:
-            db = _thread_locals.request.database or DEFAULT_DB_ALIAS
-        except Exception:
-            db = DEFAULT_DB_ALIAS
         result = [
             '<div class="table-responsive"><table class="table table-sm table-hover">',
             '<thead><tr><th class="alignleft">%s</th><th class="text-center">%s</th><th class="text-center">%s</th></tr></thead>'
@@ -1586,13 +1552,14 @@ class AlertsWidget(Widget):
                 capfirst(force_str(_("weight"))),
             ),
         ]
-        cursor = connections[db].cursor()
-        query = """select name, count(*), sum(weight)
-      from out_problem
-      where entity in (%s)
-      group by name
-      order by name
-      """ % (
+        cursor = connections[request.database].cursor()
+        query = """
+            select name, count(*), sum(weight)
+            from out_problem
+            where entity in (%s)
+            group by name
+            order by name
+        """ % (
             ", ".join(["%s"] * len(entities))
         )
         cursor.execute(query, entities)
@@ -1713,7 +1680,7 @@ class ResourceLoadWidget(Widget):
     """
 
     @classmethod
-    def render(cls, request=None):
+    def render(cls, request):
         limit = int(request.GET.get("limit", cls.limit))
         medium = int(request.GET.get("medium", cls.medium))
         high = int(request.GET.get("high", cls.high))
@@ -1827,7 +1794,7 @@ class InventoryByLocationWidget(Widget):
              limit %s"""
 
     @classmethod
-    def render(cls, request=None):
+    def render(cls, request):
         limit = int(request.GET.get("limit", cls.limit))
         result = [
             '<svg class="chart" id="invByLoc" style="width:100%; height: 250px;"></svg>',
@@ -1908,25 +1875,25 @@ class InventoryByItemWidget(Widget):
     """
 
     @classmethod
-    def render(cls, request=None):
-        limit = int(request.GET.get("limit", cls.limit))
-        result = [
-            '<svg class="chart" id="invByItem" style="width:100%; height: 250px;"></svg>',
-            '<table style="display:none">',
-        ]
-        cursor = connections[request.database].cursor()
-        query = """select item.name, coalesce(sum(buffer.onhand * item.cost),0)
+    def render(cls, request):
+        with connections[request.database].cursor() as cursor:
+            limit = int(request.GET.get("limit", cls.limit))
+            result = [
+                '<svg class="chart" id="invByItem" style="width:100%; height: 250px;"></svg>',
+                '<table style="display:none">',
+            ]
+            query = """select item.name, coalesce(sum(buffer.onhand * item.cost),0)
                from buffer
                inner join item on buffer.item_id = item.name
                group by item.name
                order by 2 desc
                limit %s
               """
-        cursor.execute(query, (limit,))
-        for res in cursor.fetchall():
-            result.append("<tr><td>%s</td><td>%.2f</td></tr>" % (res[0], res[1]))
-        result.append("</table>")
-        return HttpResponse("\n".join(result))
+            cursor.execute(query, (limit,))
+            for res in cursor.fetchall():
+                result.append("<tr><td>%s</td><td>%.2f</td></tr>" % (res[0], res[1]))
+            result.append("</table>")
+            return HttpResponse("\n".join(result))
 
 
 Dashboard.register(InventoryByItemWidget)
@@ -1938,6 +1905,7 @@ class DeliveryPerformanceWidget(Widget):
     tooltip = _(
         "Shows the percentage of demands that are planned to be shipped completely on time"
     )
+    permissions = (("view_demand", "Can view sales order"),)
     asynchronous = True
     green = 90
     yellow = 80
@@ -1957,10 +1925,9 @@ class DeliveryPerformanceWidget(Widget):
     """
 
     @classmethod
-    def render(cls, request=None):
+    def render(cls, request):
         green = int(request.GET.get("green", cls.green))
         yellow = int(request.GET.get("yellow", cls.yellow))
-        cursor = connections[request.database].cursor()
         GridReport.getBuckets(request)
         query = (
             """
@@ -1977,16 +1944,17 @@ class DeliveryPerformanceWidget(Widget):
             """
             % request.report_enddate
         )
-        cursor.execute(query)
-        val = cursor.fetchone()[0]
-        result = [
-            '<div style="text-align: center"><span id="otd"></span></div>',
-            '<span id="otd_label" style="display:none">%s</span>'
-            % force_str(_("On time delivery")),
-            '<span id="otd_value" style="display:none">%s</span>' % val,
-            '<span id="otd_green" style="display:none">%s</span>' % green,
-            '<span id="otd_yellow" style="display:none">%s</span>' % yellow,
-        ]
+        with connections[request.database].cursor() as cursor:
+            cursor.execute(query)
+            val = cursor.fetchone()[0]
+            result = [
+                '<div style="text-align: center"><span id="otd"></span></div>',
+                '<span id="otd_label" style="display:none">%s</span>'
+                % force_str(_("On time delivery")),
+                '<span id="otd_value" style="display:none">%s</span>' % val,
+                '<span id="otd_green" style="display:none">%s</span>' % green,
+                '<span id="otd_yellow" style="display:none">%s</span>' % yellow,
+            ]
         return HttpResponse("\n".join(result))
 
 

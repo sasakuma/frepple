@@ -243,13 +243,10 @@ class Command(BaseCommand):
             # Set environment variables
             if task.name != "odoo_import":
                 if options["env"]:
-                    task.arguments = (
-                        "--constraint=%s --plantype=%d --env=%s"
-                        % (
-                            constraintString(constraint),
-                            plantype,
-                            options["env"],
-                        )                    
+                    task.arguments = "--constraint=%s --plantype=%d --env=%s" % (
+                        constraintString(constraint),
+                        plantype,
+                        options["env"],
                     )
                     for i in options["env"].split(","):
                         j = i.split("=")
@@ -292,13 +289,6 @@ class Command(BaseCommand):
                         resource.RLIMIT_CPU,
                         (settings.MAXCPUTIME, settings.MAXCPUTIME + 5),
                     )
-                # Limiting the file size is a bit tricky as this limit not only applies to the log
-                # file, but also to temp files during the export
-                # if settings.MAXTOTALLOGFILESIZE:
-                #  resource.setrlimit(
-                #    resource.RLIMIT_FSIZE,
-                #   (settings.MAXTOTALLOGFILESIZE * 1024 * 1024, (settings.MAXTOTALLOGFILESIZE + 1) * 1024 * 1024)
-                #   )
 
             # Make sure the forecast engine uses the same correct timezone
             os.environ["PGTZ"] = settings.TIME_ZONE
@@ -406,7 +396,7 @@ class Command(BaseCommand):
 
     @staticmethod
     def getHTML(request, widget=False):
-        if request.user.has_perm("auth.generate_plan"):
+        if request.user.has_perm("auth.auth.generate_plan"):
             # Collect optional tasks
             planning_options = freppledb.common.commands.PlanTaskRegistry.getLabels(
                 database=request.database

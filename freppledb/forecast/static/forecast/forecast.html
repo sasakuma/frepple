@@ -136,7 +136,7 @@
 
   <div class="row">
     <div class="col">
-      <h1 id="detailtitle" style="text-transform: capitalize;">{{'forecast'|translate}}:
+      <h1 id="detailtitle" class="text-capitalize;">{{'forecast'|translate}}:
         <span data-ng-repeat="something in sequence">
           <span data-ng-if="$index > 0">&nbsp;-&nbsp;</span>
           <span data-ng-if="something=='I'">{{ selecteditem }}{{ selecteditemdescription }}
@@ -174,16 +174,13 @@
     <div id="tabs" class="col-auto form-inline ms-auto">
       <ul class="nav nav-tabs">
         <li class="nav-item" id="attributestab" role="presentation" data-ng-click="showtab='attributes'; savePreferences();">
-          <a data-ng-class="{'nav-link': true, 'active': showtab=='attributes'}" style="text-transform: capitalize" translate>attributes</a>
+          <a data-ng-class="['text-capitalize', {'nav-link': true, 'active': showtab=='attributes'}]" translate>attributes</a>
         </li>
         <li class="nav-item" id="forecasttab" role="presentation" data-ng-click="showtab='forecast'; savePreferences();">
-          <a data-ng-class="{'nav-link': true, 'active': showtab=='forecast'}" class="ui-tabs-anchor" style="text-transform: capitalize" translate>forecast</a>
+          <a data-ng-class="['text-capitalize', {'nav-link': true, 'active': showtab=='forecast'}]" class="ui-tabs-anchor" translate>forecast</a>
         </li>
         <li class="nav-item" id="commentstab" role="presentation" data-ng-click="showtab='comments'; savePreferences();">
-          <a  data-ng-class="{'nav-link': true, 'active': showtab=='comments'}" style="text-transform: capitalize" translate>comments</a>
-        </li>
-        <li class="nav-item" id="historytab" role="presentation" data-ng-click="showtab='history'; savePreferences();">
-          <a data-ng-class="{'nav-link': true, 'active': showtab=='history'}" style="text-transform: capitalize" translate>history</a>
+          <a  data-ng-class="['text-capitalize', {'nav-link': true, 'active': showtab=='comments'}]" translate>comments</a>
         </li>
       </ul>
     </div>
@@ -267,22 +264,6 @@
             <pre>{{::record.comment}}</pre>
           </span>
         </div>
-      </div>
-
-    </div>
-  </div>
-
-  <div id="historydata" class="clear" data-ng-show="showtab=='history'">
-    <div class="row">
-
-      <div class="col-md-12">
-        <span id="history">
-          <div data-ng-repeat="record in detaildata.history">
-            <span style="font-weight: bold">{{::record.content_type}}&nbsp;:&nbsp;{{::record.object_id}}</span>
-            <span class="float_right">{{::record.user }}&nbsp;:&nbsp;{{::record.action_time}}</span>
-            <span>{{::record.change_message}}</span>
-          </div>
-        </span>
       </div>
 
     </div>

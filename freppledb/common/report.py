@@ -61,7 +61,12 @@ from django.core.cache import cache
 from django.db import connection
 from django.db.models import Model, Lookup
 from django.db.models.expressions import RawSQL
-from django.db.utils import DEFAULT_DB_ALIAS, load_backend, OperationalError
+from django.db.utils import (
+    DEFAULT_DB_ALIAS,
+    load_backend,
+    OperationalError,
+    DatabaseError,
+)
 from django.contrib.auth.models import Group
 from django.contrib.auth import get_permission_codename
 from django.conf import settings
@@ -613,7 +618,6 @@ class GridReport(View):
 
     # Include time bucket support in the report
     hasTimeBuckets = False
-    hasTimeOnly = False
 
     # Allow to exclude time buckets in the past
     showOnlyFutureTimeBuckets = False
@@ -818,9 +822,17 @@ class GridReport(View):
                 )
             except Exception:
                 bucket = None
-        if not arg_buckets and not request.user.horizonbuckets and bucket:
+        if (
+            not arg_buckets
+            and not request.user.horizonbuckets
+            and bucket
+            and request.user.horizonbuckets != bucket
+        ):
             request.user.horizonbuckets = bucket
-            request.user.save()
+            try:
+                request.user.save()
+            except DatabaseError:
+                pass
 
         # Get the report horizon
         current, start, end = getHorizon(
@@ -832,7 +844,7 @@ class GridReport(View):
         request.report_startdate = start
         request.report_enddate = end
         request.report_bucket = str(bucket)
-        if bucket and not getattr(cls, "hasTimeOnly", False):
+        if bucket:
             res = BucketDetail.objects.using(request.database).filter(bucket=bucket)
             if start:
                 res = res.filter(enddate__gt=start)
@@ -1797,14 +1809,6 @@ class GridReport(View):
             ):
                 cls.canDuplicate = False
 
-        # scenario_permissions is used to display multiple scenarios in the export dialog
-        if not hasattr(request.user, "scenarios"):
-            MultiDBBackend.getScenarios(request.user)
-        if len(request.user.scenarios) > 1:
-            scenario_permissions = cls.getScenarios(request, *args, **kwargs)
-        else:
-            scenario_permissions = []
-
         if not fmt:
             # Return HTML page
             if not hasattr(request, "crosses"):
@@ -1873,7 +1877,17 @@ class GridReport(View):
                 "args": args,
                 "bucketnames": bucketnames,
                 "model": cls.model,
-                "scenario_permissions": scenario_permissions,
+                # Note: we don't check here whether the user has the required priviliges
+                # in the requested scenario. This check is only done when the export is
+                # executed.
+                "scenario_permissions": [
+                    [
+                        i.name,
+                        i.tag,
+                        1 if i.name == request.database else 0,
+                    ]
+                    for i in request.user.scenarios
+                ],
                 "hasaddperm": cls.editable
                 and cls.model
                 and (
@@ -1928,8 +1942,9 @@ class GridReport(View):
         elif fmt in ("spreadsheetlist", "spreadsheettable", "spreadsheet"):
             scenarios = request.GET.get("scenarios", None)
             scenario_list = scenarios.split(",") if scenarios else [request.database]
-            # Make sure scenarios are in the scenario_permissions list
+            # Make sure the user has the requiredd permissions in the requested scenarios!
             if scenarios:
+                scenario_permissions = cls.getScenarios(request, *args, **kwargs)
                 scenario_list = {
                     t[0]: t[1] for t in scenario_permissions if t[0] in scenario_list
                 }
@@ -1961,6 +1976,7 @@ class GridReport(View):
             scenario_list = scenarios.split(",") if scenarios else [request.database]
             # Make sure scenarios are in the scenario_permissions list
             if scenarios:
+                scenario_permissions = cls.getScenarios(request, *args, **kwargs)
                 scenario_list = {
                     t[0]: t[1] for t in scenario_permissions if t[0] in scenario_list
                 }
@@ -2065,7 +2081,7 @@ class GridReport(View):
                         elif isinstance(r, GridFieldChoice):
                             if v is None:
                                 fields[f] = None
-                            elif False and v.lower() in [
+                            elif v.lower() in [
                                 force_str(i[1]).lower() for i in r.choices
                             ]:
                                 fields[f] = [

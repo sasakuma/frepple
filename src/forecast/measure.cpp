@@ -34,6 +34,7 @@ const MetaClass* ForecastMeasureAggregated::metadata;
 const MetaClass* ForecastMeasureAggregatedPlanned::metadata;
 const MetaClass* ForecastMeasureLocal::metadata;
 const MetaClass* ForecastMeasureComputed::metadata;
+const MetaClass* ForecastMeasureComputedPlanned::metadata;
 const MetaClass* ForecastMeasureTemp::metadata;
 const Keyword ForecastMeasureAggregated::tag_overrides("overrides");
 
@@ -46,7 +47,7 @@ const ForecastMeasureAggregated* Measures::orderstotal = nullptr;
 const ForecastMeasureAggregated* Measures::ordersadjustment = nullptr;
 const ForecastMeasureAggregated* Measures::ordersopen = nullptr;
 const ForecastMeasureAggregatedPlanned* Measures::forecastplanned = nullptr;
-const ForecastMeasureAggregatedPlanned* Measures::ordersplanned = nullptr;
+const ForecastMeasureAggregated* Measures::ordersplanned = nullptr;
 const ForecastMeasureLocal* Measures::outlier = nullptr;
 const ForecastMeasureLocal* Measures::nodata = nullptr;
 const ForecastMeasureLocal* Measures::leaf = nullptr;
@@ -109,6 +110,11 @@ bool ForecastMeasure::isLeaf(const ForecastBase* f) const {
 }
 
 bool ForecastMeasureAggregatedPlanned::isLeaf(const ForecastBase* f) const {
+  // Planned measures are stored from the planned forecast upwards
+  return f->getPlanned();
+}
+
+bool ForecastMeasureComputedPlanned::isLeaf(const ForecastBase* f) const {
   // Planned measures are stored from the planned forecast upwards
   return f->getPlanned();
 }
@@ -455,10 +461,10 @@ PyObject* ForecastMeasure::aggregateMeasuresPython(PyObject* self,
   static const char* kwlist[] = {"includeplanned", "measures", nullptr};
   int include_planned = 0;
   PyObject* py_msrs = nullptr;
-  int ok = PyArg_ParseTupleAndKeywords(args, kwargs, "|pO:aggregateMeasures",
-                                       const_cast<char**>(kwlist),
-                                       &include_planned, &py_msrs);
-  if (!ok) return nullptr;
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|pO:aggregateMeasures",
+                                   const_cast<char**>(kwlist), &include_planned,
+                                   &py_msrs))
+    return nullptr;
 
   vector<ForecastMeasure*> msrs;
   if (py_msrs) {
@@ -496,9 +502,9 @@ PyObject* ForecastMeasure::computeMeasuresPython(PyObject* self, PyObject* args,
                                                  PyObject* kwargs) {
   static const char* kwlist[] = {"measures", nullptr};
   PyObject* py_msrs = nullptr;
-  int ok = PyArg_ParseTupleAndKeywords(args, kwargs, "|O:computeMeasures",
-                                       const_cast<char**>(kwlist), &py_msrs);
-  if (!ok) return nullptr;
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|O:computeMeasures",
+                                   const_cast<char**>(kwlist), &py_msrs))
+    return nullptr;
 
   vector<ForecastMeasure*> msrs;
   if (py_msrs) {
@@ -1312,7 +1318,6 @@ pair<double, double> MeasurePagePool::check(const string& msg) {
   unsigned int count_temp_free = 0;
   unsigned int count_temp_used = 0;
   unsigned int count_wrong_links = 0;
-  bool ok = true;
 
   // Exclusive access needed
   lock_guard<mutex> l_tmp(measurepages_temp.lock);
@@ -1356,7 +1361,6 @@ pair<double, double> MeasurePagePool::check(const string& msg) {
   if (count_freelist_fwd != count_free || count_freelist_bck != count_free) {
     logger << "Error: mismatched free count " << count_freelist_fwd << " vs "
            << count_freelist_bck << " vs " << count_free << endl;
-    ok = false;
   }
 
   // Temp free list
@@ -1371,14 +1375,12 @@ pair<double, double> MeasurePagePool::check(const string& msg) {
     logger << "Error: mismatched temp free count " << count_freelist_temp_fwd
            << " vs " << count_freelist_temp_bck << " vs " << count_temp_free
            << endl;
-    ok = false;
   }
 
   // Print stats
   if (count_wrong_links) {
     logger << "Error: " << count_wrong_links << "incorrect links in list"
            << endl;
-    ok = false;
   }
   logger << "Measure memory page stats: " << msg << endl;
   logger << "   " << count_pages << " pages with " << count_used

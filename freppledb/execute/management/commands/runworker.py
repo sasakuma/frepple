@@ -33,7 +33,8 @@ from threading import Thread
 import time
 
 from django.conf import settings
-from django.core.management import get_commands
+from django.core.management import get_commands, load_command_class
+
 from django.core.management.base import BaseCommand, CommandError
 from django.db import DEFAULT_DB_ALIAS, connections
 
@@ -102,21 +103,19 @@ def launchWorker(database=DEFAULT_DB_ALIAS):
                     ],
                     creationflags=0x08000000,
                 )
-        elif sys.executable.find("freppleserver.exe") >= 0:
-            # Py2exe executable
-            Popen(
-                [
-                    sys.executable.replace(
-                        "freppleserver.exe", "frepplectl.exe"
-                    ),  # frepplectl executable
-                    "runworker",
-                    "--database=%s" % database,
-                ],
-                creationflags=0x08000000,
-            )  # Do not create a console window
         else:
             # Linux standard installation
             Popen(["frepplectl", "runworker", "--database=%s" % database])
+
+
+def command_accepts_user_argument(command_name):
+    app_name = get_commands()[command_name]
+    command = load_command_class(app_name, command_name)
+    parser = command.create_parser("", command_name)
+    for action in parser._actions:
+        if "--user" in action.option_strings:
+            return True
+    return False
 
 
 def runTask(task, database):
@@ -141,6 +140,8 @@ def runTask(task, database):
         # Spawn a new command process
         args = []
         kwargs = {"database": database, "task": task.id, "verbosity": 0}
+        if task.user and command_accepts_user_argument(task.name):
+            kwargs["user"] = task.user.username
         background = "background" in task.arguments if task.arguments else False
         if task.arguments:
             for i in shlex.split(task.arguments or ""):
@@ -288,25 +289,30 @@ class Command(BaseCommand):
                     )
                 runTask(task, database)
             except Exception as e:
-                # Read the task again from the database and update.
-                task = Task.objects.all().using(database).get(pk=task.id)
-                task.status = "Failed"
-                now = datetime.now()
-                if not task.started:
-                    task.started = now
-                task.finished = now
-                task.message = str(e)
-                task.save(using=database)
-                if "FREPPLE_TEST" not in os.environ:
-                    logger.debug(
-                        "Worker %s for database '%s' finished task %d at %s: failed"
-                        % (
-                            os.getpid(),
-                            settings.DATABASES[database]["NAME"],
-                            task.id,
-                            datetime.now(),
+                try:
+                    # Read the task again from the database and update.
+                    task = Task.objects.all().using(database).get(pk=task.id)
+                    task.status = "Failed"
+                    now = datetime.now()
+                    if not task.started:
+                        task.started = now
+                    task.finished = now
+                    task.message = str(e)
+                    task.save(using=database)
+                    if "FREPPLE_TEST" not in os.environ:
+                        logger.debug(
+                            "Worker %s for database '%s' finished task %d at %s: failed"
+                            % (
+                                os.getpid(),
+                                settings.DATABASES[database]["NAME"],
+                                task.id,
+                                datetime.now(),
+                            )
                         )
-                    )
+                except Exception:
+                    # It's possible the database is release by now and we can't updte the task
+                    pass
+
         # Remove the parameter again
         try:
             Parameter.objects.all().using(database).get(pk="Worker alive").delete()
@@ -318,20 +324,22 @@ class Command(BaseCommand):
         totallogs = 0
         filelist = []
         for x in os.listdir(settings.FREPPLE_LOGDIR):
-            if x.endswith(".log"):
-                size = 0
-                creation = 0
+            if x.endswith((".log", ".dump")):
                 filename = os.path.join(settings.FREPPLE_LOGDIR, x)
                 # needs try/catch because log files may still be open or being used and Windows does not like it
                 try:
                     size = os.path.getsize(filename)
-                    creation = os.path.getctime(filename)
                     filelist.append(
-                        {"name": filename, "size": size, "creation": creation}
+                        {
+                            "name": filename,
+                            "size": size,
+                            "creation": os.path.getctime(filename),
+                        }
                     )
+                    totallogs += size
                 except Exception:
                     pass
-                totallogs += size
+
         todelete = totallogs - settings.MAXTOTALLOGFILESIZE * 1024 * 1024
         filelist.sort(key=operator.itemgetter("creation"))
         for fordeletion in filelist:
@@ -341,6 +349,8 @@ class Command(BaseCommand):
                     todelete -= fordeletion["size"]
                 except Exception:
                     pass
+            else:
+                break
 
         # Exit
         if "FREPPLE_TEST" not in os.environ:

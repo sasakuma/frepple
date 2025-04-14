@@ -37,6 +37,7 @@ from freppledb.forecast.tests.seleniumpages.forecastpage import ForecastTablePag
 @unittest.skipUnless(
     "freppledb.forecast" in settings.INSTALLED_APPS, "App not activated"
 )
+@unittest.skipIf(noSelenium, "selenium not installed")
 class ForecastEditorScreen(SeleniumTest):
     fixtures = ["manufacturing_demo"]
 
@@ -52,7 +53,6 @@ class ForecastEditorScreen(SeleniumTest):
         management.call_command("stopwebservice", force=True, wait=True)
         super().tearDown()
 
-    @unittest.skipIf(noSelenium, "selenium not installed")
     def test_table_forecast_override(self):
         newQuantity = 20
         month_to_override = 3
@@ -75,7 +75,7 @@ class ForecastEditorScreen(SeleniumTest):
         with connections[DEFAULT_DB_ALIAS].cursor() as cursor:
             cursor.execute(
                 """
-                select sum((value->>'forecastoverride')::numeric)
+                select sum(forecastoverride)
                 from forecastplan
                 where item_id = (select name from item where lvl = 0)
                   and location_id = (select name from location where lvl = 0)
@@ -118,12 +118,12 @@ class ForecastEditorScreen(SeleniumTest):
         with connections[DEFAULT_DB_ALIAS].cursor() as cursor:
             cursor.execute(
                 """
-                select count(value->>'forecastoverride')
+                select count(forecastoverride)
                 from forecastplan
                 where item_id = (select name from item where lvl = 0)
                   and location_id = (select name from location where lvl = 0)
                   and customer_id = (select name from customer where lvl = 0)
-                  and (value->>'forecastoverride')::numeric > 0
+                  and forecastoverride > 0
                 """
             )
 

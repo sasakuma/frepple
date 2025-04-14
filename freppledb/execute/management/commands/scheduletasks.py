@@ -21,19 +21,22 @@
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from importlib import import_module
 import os
 from random import uniform
 import re
+from psycopg2.errors import SerializationFailure
 from threading import Lock, Timer
 import time
+import zoneinfo
 
 from django.conf import settings
 from django.core.mail import EmailMessage
 from django.core.management import get_commands
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction, DEFAULT_DB_ALIAS, connection
+from django.db import transaction, DEFAULT_DB_ALIAS, connection, connections
+from django.db.utils import OperationalError
 from django.template.loader import render_to_string
 from django.utils.translation import gettext_lazy as _
 
@@ -54,22 +57,27 @@ class TaskScheduler:
         with self.mutex:
             for db in (
                 Scenario.objects.using(DEFAULT_DB_ALIAS)
-                .filter(status="In use")
+                .filter(status="In use", info__has_key="has_schedule")
                 .only("name")
             ):
-                with transaction.atomic(using=db.name):
-                    with connection.cursor() as cursor:
-                        cursor.execute(
-                            "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"
-                        )
-                        for s in (
-                            ScheduledTask.objects.all()
-                            .using(db.name)
-                            .order_by("name")
-                            .select_for_update(skip_locked=True)
-                        ):
-                            # Calculation of the next run is included in the save method
-                            s.save(using=db.name, update_fields=["next_run"])
+                try:
+                    with transaction.atomic(using=db.name):
+                        with connection.cursor() as cursor:
+                            cursor.execute(
+                                "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"
+                            )
+                            for s in (
+                                ScheduledTask.objects.all()
+                                .using(db.name)
+                                .order_by("name")
+                                .select_for_update(skip_locked=True)
+                            ):
+                                # Calculation of the next run is included in the save method
+                                s.save(using=db.name, update_fields=["next_run"])
+                except (SerializationFailure, OperationalError):
+                    # Concurrent access by different webserver processes can happen.
+                    # In that case, one of the transactions will abort. That's fine.
+                    pass
         self.waitNextEvent()
 
     def waitNextEvent(self, database=None):
@@ -77,7 +85,7 @@ class TaskScheduler:
             now = datetime.now()
             dbs = (
                 Scenario.objects.using(DEFAULT_DB_ALIAS)
-                .filter(status="In use")
+                .filter(status="In use", info__has_key="has_schedule")
                 .only("name")
             )
             if database:
@@ -113,35 +121,41 @@ class TaskScheduler:
         # Note: use transaction and select_for_update to handle concurrent access
         now = datetime.now()
         created = False
-        with transaction.atomic(using=database):
-            with connection.cursor() as cursor:
-                cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-                for schedule in (
-                    ScheduledTask.objects.all()
-                    .using(database)
-                    .filter(next_run__isnull=False, next_run__lte=now)
-                    .order_by("next_run", "name")
-                    .select_for_update(skip_locked=True)
-                ):
-                    Task(
-                        name="scheduletasks",
-                        submitted=now,
-                        status="Waiting",
-                        user=schedule.user,
-                        arguments="--schedule='%s'" % schedule.name,
-                    ).save(using=database)
-                    # Calculation of the next run is included in the save method
-                    schedule.save(using=database, update_fields=["next_run"])
-                    created = True
+        try:
+            with transaction.atomic(using=database):
+                with connection.cursor() as cursor:
+                    cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+                    for schedule in (
+                        ScheduledTask.objects.all()
+                        .using(database)
+                        .filter(next_run__isnull=False, next_run__lte=now)
+                        .order_by("next_run", "name")
+                        .select_for_update(skip_locked=True)
+                    ):
+                        Task(
+                            name="scheduletasks",
+                            submitted=now,
+                            status="Waiting",
+                            user=schedule.user,
+                            arguments="--schedule='%s'" % schedule.name,
+                        ).save(using=database)
+                        # Calculation of the next run is included in the save method
+                        schedule.save(using=database, update_fields=["next_run"])
+                        created = True
 
-        # Reschedule to run this task again at the next date
-        if database in scheduler.sched:
-            del scheduler.sched[database]
-        scheduler.waitNextEvent(database=database)
+            # Reschedule to run this task again at the next date
+            if database in scheduler.sched:
+                del scheduler.sched[database]
+            scheduler.waitNextEvent(database=database)
 
-        # Synchronously run the worker process
-        if created:
-            launchWorker(database)
+            # Synchronously run the worker process
+            if created:
+                launchWorker(database)
+
+        except (SerializationFailure, OperationalError):
+            # Concurrent access by different webserver processes can happen.
+            # In that case, one of the transactions will abort. That's fine.
+            pass
 
     def status(self, msg=""):
         print("Scheduler status:", msg)
@@ -415,36 +429,48 @@ class Command(BaseCommand):
 
     @classmethod
     def getHTML(cls, request, widget=False):
-        commands = []
-        for commandname, appname in get_commands().items():
-            if commandname != "scheduletasks":
-                try:
-                    cmd = getattr(
-                        import_module(
-                            "%s.management.commands.%s" % (appname, commandname)
-                        ),
-                        "Command",
-                    )
-                    if getattr(cmd, "index", -1) >= 0 and getattr(cmd, "getHTML", None):
-                        commands.append((cmd.index, commandname))
-                except Exception:
-                    pass
-        commands = [i[1] for i in sorted(commands)]
-        offset = GridReport.getTimezoneOffset(request)
-        schedules = [
-            s.adjustForTimezone(offset)
-            for s in ScheduledTask.objects.all()
-            .using(request.database)
-            .order_by("name")
-        ]
-        if not widget:
-            schedules.append(ScheduledTask())  # Add an empty template
-        return render_to_string(
-            "commands/scheduletasks.html",
-            {
-                "schedules": schedules,
-                "commands": commands,
-                "widget": widget,
-            },
-            request=request,
-        )
+        try:
+            commands = []
+            for commandname, appname in get_commands().items():
+                if commandname != "scheduletasks":
+                    try:
+                        cmd = getattr(
+                            import_module(
+                                "%s.management.commands.%s" % (appname, commandname)
+                            ),
+                            "Command",
+                        )
+                        if getattr(cmd, "index", -1) >= 0 and getattr(
+                            cmd, "getHTML", None
+                        ):
+                            commands.append((cmd.index, commandname))
+                    except Exception:
+                        pass
+            commands = [i[1] for i in sorted(commands)]
+            offset = GridReport.getTimezoneOffset(request)
+            schedules = [
+                s.adjustForTimezone(offset)
+                for s in ScheduledTask.objects.all()
+                .using(request.database)
+                .order_by("name")
+            ]
+            if not widget:
+                schedules.append(ScheduledTask())  # Add an empty template
+            return render_to_string(
+                "commands/scheduletasks.html",
+                {
+                    "schedules": schedules,
+                    "commands": commands,
+                    "widget": widget,
+                    "timezones": sorted(
+                        [
+                            (datetime.now(zoneinfo.ZoneInfo(i)).strftime("%z"), i)
+                            for i in zoneinfo.available_timezones()
+                        ]
+                    ),
+                    "default_timezone": settings.TIME_ZONE,
+                },
+                request=request,
+            )
+        except Exception as e:
+            print(e)

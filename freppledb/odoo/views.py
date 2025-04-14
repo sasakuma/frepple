@@ -22,7 +22,7 @@
 #
 
 import base64
-import email
+from datetime import datetime
 from html.parser import HTMLParser
 import json
 import jwt
@@ -36,7 +36,12 @@ from django.http import HttpResponse, HttpResponseServerError, HttpResponseNotAl
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.csrf import csrf_protect
 
-from freppledb.input.models import PurchaseOrder, DistributionOrder, OperationPlan
+from freppledb.input.models import (
+    PurchaseOrder,
+    DistributionOrder,
+    OperationPlan,
+    Supplier,
+)
 from freppledb.common.models import Parameter
 
 import logging
@@ -128,88 +133,135 @@ def Upload(request):
 
         # Validate records which exist in the database
         data = json.loads(request.body.decode("utf-8"))
-        data_ok = False
         obj = []
         for rec in data:
             try:
-                if not "reference" in rec:
+                reference = rec.get(
+                    "reference", rec.get("operationplan__reference", None)
+                )
+                type = rec.get("operationplan__type", rec.get("type", None))
+                if not reference or not rec["quantity"]:
                     continue
-                elif rec.get("type", None) == "PO":
-                    po = PurchaseOrder.objects.using(request.database).get(
-                        reference=rec["reference"]
+
+                # check if some records were updated by the user
+                op = OperationPlan.objects.using(request.database).get(
+                    reference=reference
+                )
+
+                # date format can be "%Y-%m-%dT%H:%M:%S" if coming from sales orders
+                # otherwise settings.DATETIME_INPUT_FORMATS[0]
+                if rec.get("enddate"):
+                    try:
+                        # SO table
+                        enddate = datetime.strptime(
+                            rec.get("enddate"), "%Y-%m-%dT%H:%M:%S"
+                        )
+                    except:
+                        # PO/MO/DO table
+                        enddate = datetime.strptime(
+                            rec.get("enddate"),
+                            (
+                                settings.DATETIME_INPUT_FORMATS[0]
+                                if settings.DATE_STYLE_WITH_HOURS
+                                else settings.DATE_INPUT_FORMATS[0]
+                            ),
+                        )
+                else:
+                    # inventory/resource detail table
+                    enddate = datetime.strptime(
+                        rec.get("operationplan__enddate"),
+                        (
+                            settings.DATETIME_INPUT_FORMATS[0]
+                            if settings.DATE_STYLE_WITH_HOURS
+                            else settings.DATE_INPUT_FORMATS[0]
+                        ),
                     )
+
+                if op.enddate != enddate:
+                    op.enddate = enddate
+                    op.dirty = True
+
+                supplier = rec.get("supplier", rec.get("operationplan__supplier__name"))
+                if op.supplier and supplier and op.supplier.name != supplier:
+                    s = Supplier.objects.using(request.database).get(name=supplier)
+                    op.supplier = s
+                    op.dirty = True
+
+                if op.quantity != rec["quantity"]:
+                    op.quantity = rec["quantity"]
+                    op.dirty = True
+
+                if type == "PO":
                     if (
-                        not po.supplier.source
+                        not op.supplier.source
                         or not (
-                            po.status == "proposed"
+                            op.status == "proposed"
                             or (
-                                po.status in ("approved", "confirmed")
-                                and po.source == "odoo_1"
+                                op.status in ("approved", "confirmed")
+                                and op.source == "odoo_1"
                             )
                         )
-                        or not po.item
-                        or not po.item.source
-                        or po.item.type == "make to order"
+                        or not op.item
+                        or not op.item.source
+                        or op.item.type == "make to order"
                     ):
                         continue
-                    data_ok = True
-                    obj.append(po)
+
+                    obj.append(op)
                     data_odoo.append(
                         '<operationplan ordertype="PO" id="%s" item=%s location=%s supplier=%s start="%s" end="%s" quantity="%s" location_id=%s item_id=%s criticality="%d" batch=%s status=%s remark=%s/>'
                         % (
-                            po.reference,
-                            quoteattr(po.item.name),
-                            quoteattr(po.location.name),
-                            quoteattr(po.supplier.name),
-                            po.startdate,
-                            po.enddate,
-                            po.quantity,
-                            quoteattr(po.location.subcategory or ""),
-                            quoteattr(po.item.subcategory or ""),
-                            int(po.criticality or 0),
-                            quoteattr(po.batch or ""),
-                            quoteattr(po.status),
-                            quoteattr(getattr(po, "remark", None) or ""),
+                            op.reference,
+                            quoteattr(op.item.name),
+                            quoteattr(op.location.name),
+                            quoteattr(op.supplier.name),
+                            op.startdate,
+                            op.enddate,
+                            op.quantity,
+                            quoteattr(op.location.subcategory or ""),
+                            quoteattr(op.item.subcategory or ""),
+                            int(op.criticality or 0),
+                            quoteattr(op.batch or ""),
+                            quoteattr(op.status),
+                            quoteattr(getattr(op, "remark", None) or ""),
                         )
                     )
-                elif rec.get("type", None) == "DO":
-                    do = DistributionOrder.objects.using(request.database).get(
-                        reference=rec["reference"]
+                elif type == "DO":
+                    op = DistributionOrder.objects.using(request.database).get(
+                        reference=reference
                     )
                     if (
-                        not do.origin.source
-                        or not do.destination.source
-                        or do.status != "proposed"
-                        or not do.item
-                        or not do.item.source
-                        or do.item.type == "make to order"
+                        not op.origin.source
+                        or not op.destination.source
+                        or op.status != "proposed"
+                        or not op.item
+                        or not op.item.source
+                        or op.item.type == "make to order"
                     ):
                         continue
-                    data_ok = True
-                    obj.append(do)
+
+                    obj.append(op)
                     data_odoo.append(
                         '<operationplan status="%s" reference="%s" ordertype="DO" item=%s origin=%s destination=%s start="%s" end="%s" quantity="%s" origin_id=%s destination_id=%s item_id=%s criticality="%d" batch=%s remark=%s/>'
                         % (
-                            do.status,
-                            do.reference,
-                            quoteattr(do.item.name),
-                            quoteattr(do.origin.name),
-                            quoteattr(do.destination.name),
-                            do.startdate,
-                            do.enddate,
-                            do.quantity,
-                            quoteattr(do.origin.subcategory or ""),
-                            quoteattr(do.destination.subcategory or ""),
-                            quoteattr(do.item.subcategory or ""),
-                            int(do.criticality or 0),
-                            quoteattr(do.batch or ""),
-                            quoteattr(getattr(do, "remark", None) or ""),
+                            op.status,
+                            op.reference,
+                            quoteattr(op.item.name),
+                            quoteattr(op.origin.name),
+                            quoteattr(op.destination.name),
+                            op.startdate,
+                            op.enddate,
+                            op.quantity,
+                            quoteattr(op.origin.subcategory or ""),
+                            quoteattr(op.destination.subcategory or ""),
+                            quoteattr(op.item.subcategory or ""),
+                            int(op.criticality or 0),
+                            quoteattr(op.batch or ""),
+                            quoteattr(getattr(op, "remark", None) or ""),
                         )
                     )
-                else:
-                    op = OperationPlan.objects.using(request.database).get(
-                        reference=rec["reference"]
-                    )
+                elif type not in ("DLVR", "STCK"):
+
                     if op.owner and op.owner.status in (
                         "proposed",
                         "approved",
@@ -218,7 +270,8 @@ def Upload(request):
                         # We are only sending the MOs with the detail of their WOs
                         op = op.owner
                     if (
-                        not op.operation.source
+                        not op.operation
+                        or not op.operation.source
                         or not (
                             op.status == "proposed"
                             or (
@@ -233,7 +286,7 @@ def Upload(request):
                         or not op.operation
                     ):
                         continue
-                    data_ok = True
+
                     obj.append(op)
                     if op.operation.category == "subcontractor":
                         data_odoo.append(
@@ -280,13 +333,20 @@ def Upload(request):
                         ]
                         if wolist:
                             for wo in wolist:
+                                net_duration = wo.enddate - wo.startdate
+                                if wo.plan:
+                                    for w in wo.plan.get("interruptions", []):
+                                        net_duration -= datetime.strptime(
+                                            w[1], "%Y-%m-%d %H:%M:%S"
+                                        ) - datetime.strptime(w[0], "%Y-%m-%d %H:%M:%S")
                                 data_odoo.append(
-                                    '<workorder operation=%s start="%s" end="%s" remark=%s>'
+                                    '<workorder operation=%s start="%s" end="%s" remark=%s net_duration="%s">'
                                     % (
                                         quoteattr(wo.operation.name),
                                         wo.startdate,
                                         wo.enddate,
                                         quoteattr(getattr(wo, "remark", None) or ""),
+                                        int(net_duration.total_seconds()),
                                     )
                                 )
                                 for wores in wo.resources.using(request.database).all():
@@ -321,11 +381,10 @@ def Upload(request):
                                         )
                                     )
                         data_odoo.append("</operationplan>")
-
             except Exception as e:
                 logger.error("Exception during odoo export: %s" % e)
-        if not data_ok:
-            return HttpResponseServerError(_("No proposed data records selected"))
+        if not obj:
+            return HttpResponse(status=204)
 
         # Send the data to Odoo
         data_odoo.append("</operationplans></plan>")
@@ -337,6 +396,11 @@ def Upload(request):
             ("%s:%s" % (odoo_user, odoo_password)).encode("utf-8")
         )
         logger.debug("Uploading %d bytes of planning results to Odoo" % size)
+
+        for i in obj:
+            if hasattr(i, "dirty"):
+                i.save(using=request.database)
+
         req = Request(
             "%sfrepple/xml/" % odoo_url,
             data=body,

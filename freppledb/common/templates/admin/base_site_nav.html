@@ -78,13 +78,14 @@ $(function() {
 				</div>
 			</form>
 
-      {% if not request.session.navbar and user.is_authenticated and user.is_staff %}
+      {% if user.is_authenticated and user.is_staff %}
 	  <div id="nav-menu-end" class="collapse navbar-collapse">
+	  {% if not request.session.navbar %}
       <ul class="nav navbar-nav ms-auto">
         <li class="navbar-item" data-bs-toggle="tooltip" data-bs-html="true" data-bs-placement="bottom"
-          style="position:relative" data-bs-title="{% trans "No unread messages" %}">
+          style="position:relative" data-bs-title="{% trans "No unread messages" %}" data-bs-offset="0,7">
           <a class="nav-link" href="{{request.prefix}}/inbox/">
-            <span id="messages" style="font-size: 1.5em" class="fa fa-envelope-open-o" aria-hidden="true"></span>
+            <i id="messages" style="font-size: 1.5em" class="fa fa-envelope-open-o" aria-hidden="true"></i>
             <span class="position-absolute top-20 start-50 translate-middle badge rounded-pill bg-danger" aria-hidden="true"></span>
 			&nbsp;&nbsp;
           </a>
@@ -103,6 +104,12 @@ $(function() {
 				</ul>
 			  </li>
       </ul>
+	{% else %}
+	<div class="nav navbar-nav ms-auto">
+		<a class="nav-link" href="{{request.prefix}}/preferences/" data-bs-toggle="tooltip"
+		data-bs-title="{% trans 'preferences'|capfirst %}"><span class="fa fa-gear fa-2x"></span></a>
+	</div>
+	{% endif %}
 	</div>
           {% endif %}
 		</div>
@@ -127,13 +134,11 @@ $(function() {
           			   role="button" aria-haspopup="true" aria-expanded="false" id="database" name="{{ request.scenario.name }}">
 					<span data-bs-toggle="tooltip" data-bs-delay='{"show":2000, "hide":4000}' data-bs-placement="left"
 					  data-bs-title="{% trans "Select a what-if scenario.<br>Click <a class='text-decoration-underline' href='/execute/#scenario_copy'>here</a> to manage scenarios." %}"
-					  data-bs-html="true">
-						{{ request.scenario.description }}
-					</span>
+					  data-bs-html="true">{{ request.scenario.tag }}</span>
 					</a>
 					<ul class="dropdown-menu dropdown-menu-end">
 					{% for sc in user.scenarios|sortList %}<li>
-					  <a class="dropdown-item" data-database="{{ sc.name }}" onclick="selectDatabase(event.target)">{{ sc.description }}
+					  <a class="dropdown-item" data-database="{{ sc.name }}" onclick="selectDatabase(event.target)">{{ sc.tag }}
 					  {% if sc.help_url %}
 					  <span onclick="window.open('{{sc.help_url|safe}}'); event.stopPropagation()" style="float:right" class="fa fa-question-circle"></span>
 					  {% endif %}</a>

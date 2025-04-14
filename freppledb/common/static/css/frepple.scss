@@ -220,11 +220,6 @@ tr.ui-state-highlight {
     background: lighten($danger, 15%) !important;
 }
 
-.editablepivotcol {
-    line-height: 21px;
-    display: block;
-}
-
 // Avatar
 img.avatar-sm {
     border-radius: 50%;
@@ -930,4 +925,13 @@ pre {
 // Fix date widget in chrome
 input[type="date"] {
     appearance: auto;
+}
+
+// Draggable widgets
+.widget-handle {
+    cursor: grab;
+}
+
+.widget-handle:active {
+    cursor: grabbing;
 }

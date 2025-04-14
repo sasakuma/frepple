@@ -546,33 +546,48 @@ class DemandList(GridReport):
         ),
     )
 
-    actions = [
-        {
-            "name": "inquiry",
-            "label": format_lazy(_("change status to {status}"), status=_("inquiry")),
-            "function": "grid.setStatus('inquiry')",
-        },
-        {
-            "name": "quote",
-            "label": format_lazy(_("change status to {status}"), status=_("quote")),
-            "function": "grid.setStatus('quote')",
-        },
-        {
-            "name": "open",
-            "label": format_lazy(_("change status to {status}"), status=_("open")),
-            "function": "grid.setStatus('open')",
-        },
-        {
-            "name": "closed",
-            "label": format_lazy(_("change status to {status}"), status=_("closed")),
-            "function": "grid.setStatus('closed')",
-        },
-        {
-            "name": "canceled",
-            "label": format_lazy(_("change status to {status}"), status=_("canceled")),
-            "function": "grid.setStatus('canceled')",
-        },
-    ]
+    if settings.ERP_CONNECTOR:
+        actions = [
+            {
+                "name": "erp_incr_export",
+                "label": format_lazy("export to {erp}", erp=settings.ERP_CONNECTOR),
+                "function": "ERPconnection.SODepExport(jQuery('#grid'),'SO')",
+            }
+        ]
+    else:
+        actions = [
+            {
+                "name": "inquiry",
+                "label": format_lazy(
+                    _("change status to {status}"), status=_("inquiry")
+                ),
+                "function": "grid.setStatus('inquiry')",
+            },
+            {
+                "name": "quote",
+                "label": format_lazy(_("change status to {status}"), status=_("quote")),
+                "function": "grid.setStatus('quote')",
+            },
+            {
+                "name": "open",
+                "label": format_lazy(_("change status to {status}"), status=_("open")),
+                "function": "grid.setStatus('open')",
+            },
+            {
+                "name": "closed",
+                "label": format_lazy(
+                    _("change status to {status}"), status=_("closed")
+                ),
+                "function": "grid.setStatus('closed')",
+            },
+            {
+                "name": "canceled",
+                "label": format_lazy(
+                    _("change status to {status}"), status=_("canceled")
+                ),
+                "function": "grid.setStatus('canceled')",
+            },
+        ]
 
 
 class DeliveryOrderList(GridReport):
@@ -580,8 +595,6 @@ class DeliveryOrderList(GridReport):
     title = _("delivery orders")
     model = DeliveryOrder
     frozenColumns = 0
-    hasTimeBuckets = True
-    hasTimeOnly = False
     editable = True
     multiselect = True
     help_url = "model-reference/delivery-orders.html"
@@ -818,7 +831,6 @@ class DeliveryOrderList(GridReport):
     @classmethod
     def basequeryset(reportclass, request, *args, **kwargs):
         q = DeliveryOrder.objects.all()
-        use_default_filter = True
         if "calendarstart" in request.GET:
             q = q.filter(
                 Q(enddate__gte=request.GET["calendarstart"])
@@ -827,7 +839,6 @@ class DeliveryOrderList(GridReport):
                     & Q(startdate__gte=request.GET["calendarstart"])
                 )
             )
-            use_default_filter = False
         if "calendarend" in request.GET:
             q = q.filter(
                 Q(startdate__lte=request.GET["calendarend"])
@@ -836,16 +847,6 @@ class DeliveryOrderList(GridReport):
                     & Q(enddate__lte=request.GET["calendarend"])
                 )
             )
-            use_default_filter = False
-        if use_default_filter and "noautofilter" not in request.GET:
-            if request.report_enddate:
-                q = q.filter(
-                    Q(startdate__lte=request.report_enddate)
-                    | (
-                        Q(startdate__isnull=True)
-                        & Q(enddate__lte=request.report_enddate)
-                    )
-                )
 
         # special keyword superop used for search field of operationplan
         if "parentreference" in request.GET:
@@ -881,7 +882,7 @@ class DeliveryOrderList(GridReport):
                     coalesce(
                       (select quantity from demand where demand.name = demand_id),
                       (
-                          select (value->>'forecastnet')::numeric
+                          select forecastplan.forecastnet
                           from forecastplan
                           inner join forecast
                             on forecastplan.item_id = forecast.item_id and forecastplan.location_id = forecast.location_id

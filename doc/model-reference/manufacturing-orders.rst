@@ -30,9 +30,13 @@ status             non-empty string  This field should have one of the following
 
                                      * | approved:
                                        | The manufacturing order is present in the ERP system but can still be rescheduled by frePPLe (optimization input).
+                                       | It will be rescheduled if it violates the lead time, material or capacity 
+                                         constraints.
 
                                      * | confirmed:
                                        | The manufacturing order is confirmed, it has been populated in your ERP system (optimization input).
+                                       | It can not be changed by frepple, even if it violates the lead time, material or capacity 
+                                         constraints. It is considered completely locked and frozen.
 
                                      * | completed:
                                        | The manufacturing order has been executed, but the stock hasn't been increased yet (optimization input).
@@ -63,4 +67,5 @@ criticality        number            | The criticality is a read-only field, cal
                                      | Note that the criticality is independent of whether the customer demand will be shipped on time or not.
 delay              duration          | The delay is a read-only field, calculated by the planning engine.
                                      | It compares the end data of the manufacturing order with the latest possible end date to ship all demands it feeds on time.
+remark             string            | A free text field for additional information.                                   
 ================== ================= =================================================================================================================================

@@ -101,23 +101,22 @@ class Command(BaseCommand):
         force = options["force"]
         promote = options["promote"]
         test = "FREPPLE_TEST" in os.environ
+        source = options["source"]
+        Scenario.syncWithSettings()
+        try:
+            sourcescenario = Scenario.objects.using(DEFAULT_DB_ALIAS).get(pk=source)
+        except Exception:
+            raise CommandError("No source database defined with name '%s'" % source)
+
         if options["user"]:
             try:
-                user = User.objects.all().get(username=options["user"])
+                user = User.objects.all().using(source).get(username=options["user"])
             except Exception:
                 raise CommandError("User '%s' not found" % options["user"])
         else:
             user = None
 
-        # Synchronize the scenario table with the settings
-        Scenario.syncWithSettings()
-
         # Initialize the task
-        source = options["source"]
-        try:
-            sourcescenario = Scenario.objects.using(DEFAULT_DB_ALIAS).get(pk=source)
-        except Exception:
-            raise CommandError("No source database defined with name '%s'" % source)
         now = datetime.now()
         task = None
         if "task" in options and options["task"]:
@@ -241,6 +240,23 @@ class Command(BaseCommand):
                 for t in cursor:
                     noOwnershipTables.append(t[0])
 
+                # pg_dump still creates the sequences from the excluded tables
+                # we need to explicitly exclude them too
+                if destination == DEFAULT_DB_ALIAS:
+                    cursor.execute(
+                        """
+                    select s.relname as sequencename
+                    from pg_class s
+                    inner join pg_depend d on d.objid=s.oid and d.classid='pg_class'::regclass and d.refclassid='pg_class'::regclass
+                    inner join pg_class t on t.oid=d.refobjid
+                    inner join pg_namespace n on n.oid=t.relnamespace
+                    inner join pg_attribute a on a.attrelid=t.oid and a.attnum=d.refobjsubid
+                    inner join pg_sequences on pg_sequences.sequencename = s.relname
+                    where s.relkind='S' and n.nspname = 'public' and t.relname = any(%s);
+                    """,
+                        (excludedTables,),
+                    )
+                    excludedSequences = [i[0] for i in cursor]
             # Cleaning of the destination scenario
             with connections[destination].cursor() as cursor:
                 quick_drop_failed = False
@@ -353,129 +369,149 @@ class Command(BaseCommand):
                             "drop view %s" % connections[destination].ops.quote_name(i)
                         )
 
+            # Remove the old scenario access rights
+            if destination != DEFAULT_DB_ALIAS:
+                with connections[DEFAULT_DB_ALIAS].cursor() as cursor:
+                    cursor.execute(
+                        """
+                        update common_user 
+                        set databases = array_remove(databases, %s) 
+                        where %s = any(databases)
+                        """,
+                        (destination, destination),
+                    )
+
             # Copying the data
-            # Commenting the next line is a little more secure, but requires you to create a .pgpass file.
-            if not options["dumpfile"]:
-                if settings.DATABASES[source]["PASSWORD"]:
-                    os.environ["PGPASSWORD"] = settings.DATABASES[source]["PASSWORD"]
-                if os.name == "nt":
-                    # On windows restoring with pg_restore over a pipe is broken :-(
-                    cmd = "pg_dump -Fp %s%s%s%s%s%s | psql %s%s%s%s"
-                else:
+            if settings.DATABASES[source]["PASSWORD"]:
+                os.environ["PGPASSWORD"] = settings.DATABASES[source]["PASSWORD"]
+            try:
+                if not options["dumpfile"]:
                     cmd = "pg_dump -Fc %s%s%s%s%s%s | pg_restore -n public -Fc %s%s%s -d %s"
-                commandline = cmd % (
-                    settings.DATABASES[source]["USER"]
-                    and ("-U %s " % settings.DATABASES[source]["USER"])
-                    or "",
-                    settings.DATABASES[source]["HOST"]
-                    and ("-h %s " % settings.DATABASES[source]["HOST"])
-                    or "",
-                    settings.DATABASES[source]["PORT"]
-                    and ("-p %s " % settings.DATABASES[source]["PORT"])
-                    or "",
-                    (
+                    commandline = cmd % (
+                        settings.DATABASES[source]["USER"]
+                        and ("-U %s " % settings.DATABASES[source]["USER"])
+                        or "",
+                        settings.DATABASES[source]["HOST"]
+                        and ("-h %s " % settings.DATABASES[source]["HOST"])
+                        or "",
+                        settings.DATABASES[source]["PORT"]
+                        and ("-p %s " % settings.DATABASES[source]["PORT"])
+                        or "",
                         (
-                            "%s %s "
-                            % (
-                                " -T ".join(["", *excludedTables]),
-                                " --exclude-table-data=".join(["", *excludedTables]),
+                            (
+                                "%s %s "
+                                % (
+                                    " --exclude-table ".join(
+                                        ["", *(excludedTables + excludedSequences)]
+                                    ),
+                                    " --exclude-table-data ".join(
+                                        ["", *(excludedTables)]
+                                    ),
+                                )
                             )
-                        )
-                        if destination == DEFAULT_DB_ALIAS
-                        else ""
-                    ),
-                    (
-                        ("%s " % (" -T ".join(["", *noOwnershipTables])))
-                        if len(noOwnershipTables) > 0
-                        else ""
-                    ),
-                    test
-                    and settings.DATABASES[source]["TEST"]["NAME"]
-                    or settings.DATABASES[source]["NAME"],
-                    settings.DATABASES[destination]["USER"]
-                    and ("-U %s " % settings.DATABASES[destination]["USER"])
-                    or "",
-                    settings.DATABASES[destination]["HOST"]
-                    and ("-h %s " % settings.DATABASES[destination]["HOST"])
-                    or "",
-                    settings.DATABASES[destination]["PORT"]
-                    and ("-p %s " % settings.DATABASES[destination]["PORT"])
-                    or "",
-                    test
-                    and settings.DATABASES[destination]["TEST"]["NAME"]
-                    or settings.DATABASES[destination]["NAME"],
-                )
-            else:
-                cmd = "pg_restore -n public -Fc --no-password %s%s%s -d %s %s"
-                commandline = cmd % (
-                    settings.DATABASES[destination]["USER"]
-                    and ("-U %s " % settings.DATABASES[destination]["USER"])
-                    or "",
-                    settings.DATABASES[destination]["HOST"]
-                    and ("-h %s " % settings.DATABASES[destination]["HOST"])
-                    or "",
-                    settings.DATABASES[destination]["PORT"]
-                    and ("-p %s " % settings.DATABASES[destination]["PORT"])
-                    or "",
-                    test
-                    and settings.DATABASES[destination]["TEST"]["NAME"]
-                    or settings.DATABASES[destination]["NAME"],
-                    os.path.join(settings.FREPPLE_LOGDIR, options["dumpfile"]),
-                )
+                            if destination == DEFAULT_DB_ALIAS
+                            else ""
+                        ),
+                        (
+                            (
+                                "%s "
+                                % (" --exclude-table ".join(["", *noOwnershipTables]))
+                            )
+                            if len(noOwnershipTables) > 0
+                            else ""
+                        ),
+                        test
+                        and settings.DATABASES[source]["TEST"]["NAME"]
+                        or settings.DATABASES[source]["NAME"],
+                        settings.DATABASES[destination]["USER"]
+                        and ("-U %s " % settings.DATABASES[destination]["USER"])
+                        or "",
+                        settings.DATABASES[destination]["HOST"]
+                        and ("-h %s " % settings.DATABASES[destination]["HOST"])
+                        or "",
+                        settings.DATABASES[destination]["PORT"]
+                        and ("-p %s " % settings.DATABASES[destination]["PORT"])
+                        or "",
+                        test
+                        and settings.DATABASES[destination]["TEST"]["NAME"]
+                        or settings.DATABASES[destination]["NAME"],
+                    )
+                else:
+                    cmd = "pg_restore -n public -Fc --no-password %s%s%s -d %s %s"
+                    commandline = cmd % (
+                        settings.DATABASES[destination]["USER"]
+                        and ("-U %s " % settings.DATABASES[destination]["USER"])
+                        or "",
+                        settings.DATABASES[destination]["HOST"]
+                        and ("-h %s " % settings.DATABASES[destination]["HOST"])
+                        or "",
+                        settings.DATABASES[destination]["PORT"]
+                        and ("-p %s " % settings.DATABASES[destination]["PORT"])
+                        or "",
+                        test
+                        and settings.DATABASES[destination]["TEST"]["NAME"]
+                        or settings.DATABASES[destination]["NAME"],
+                        os.path.join(settings.FREPPLE_LOGDIR, options["dumpfile"]),
+                    )
 
-            with subprocess.Popen(
-                commandline,
-                shell=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            ) as p:
-                error_message = None
-                try:
-                    res = p.communicate()
-                    task.processid = p.pid
-                    task.save(using=source)
-                    p.wait()
-                    error_message = res[1].decode().partition("\n")[0]
-                    if p.returncode != 0 or "error" in error_message.lower():
-                        raise Exception(error_message)
+                with subprocess.Popen(
+                    commandline,
+                    shell=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                ) as p:
+                    error_message = None
+                    try:
+                        res = p.communicate()
+                        task.processid = p.pid
+                        task.save(using=source)
+                        p.wait()
+                        error_message = res[1].decode().partition("\n")[0]
+                        if p.returncode != 0 or "error" in error_message.lower():
+                            raise Exception(error_message)
 
-                    if not options["dumpfile"]:
-                        # Successful copy can still leave warnings and errors
-                        # To confirm copy is ok, let's check that the scenario copy task exists
-                        # in the destination database
-                        t = Task.objects.using(destination).filter(id=task.id).first()
-                        if (
-                            not t
-                            or t.name != task.name
-                            or t.submitted != task.submitted
-                        ):
+                        if not options["dumpfile"]:
+                            # Successful copy can still leave warnings and errors
+                            # To confirm copy is ok, let's check that the scenario copy task exists
+                            # in the destination database
+                            t = (
+                                Task.objects.using(destination)
+                                .filter(id=task.id)
+                                .first()
+                            )
+                            if (
+                                not t
+                                or t.name != task.name
+                                or t.submitted != task.submitted
+                            ):
+                                destinationscenario.status = "Free"
+                                destinationscenario.save(
+                                    update_fields=["status"],
+                                    using=DEFAULT_DB_ALIAS,
+                                )
+                                raise Exception("Database copy failed")
+                            t.status = "Done"
+                            t.finished = datetime.now()
+                            t.message = "Scenario copied from %s" % source
+                            t.save(
+                                using=destination,
+                                update_fields=["status", "finished", "message"],
+                            )
+
+                    except Exception as e:
+                        p.kill()
+                        p.wait()
+                        # Consider the destination database free again
+                        if destination != DEFAULT_DB_ALIAS:
                             destinationscenario.status = "Free"
-                            destinationscenario.lastrefresh = datetime.today()
                             destinationscenario.save(
-                                update_fields=["status", "lastrefresh"],
+                                update_fields=["status"],
                                 using=DEFAULT_DB_ALIAS,
                             )
-                            raise Exception("Database copy failed")
-                        t.status = "Done"
-                        t.finished = datetime.now()
-                        t.message = "Scenario copied from %s" % source
-                        t.save(
-                            using=destination,
-                            update_fields=["status", "finished", "message"],
-                        )
-
-                except Exception as e:
-                    p.kill()
-                    p.wait()
-                    # Consider the destination database free again
-                    if destination != DEFAULT_DB_ALIAS:
-                        destinationscenario.status = "Free"
-                        destinationscenario.lastrefresh = datetime.today()
-                        destinationscenario.save(
-                            update_fields=["status", "lastrefresh"],
-                            using=DEFAULT_DB_ALIAS,
-                        )
-                    raise Exception(e or "Database copy failed")
+                        raise Exception(e or "Database copy failed")
+            finally:
+                if settings.DATABASES[source]["PASSWORD"]:
+                    del os.environ["PGPASSWORD"]
 
             # Assure the identity sequences are bigger than the id values
             with connections[destination].cursor() as cursor:
@@ -555,16 +591,15 @@ class Command(BaseCommand):
 
             # Update the scenario table
             destinationscenario.status = "In use"
-            destinationscenario.lastrefresh = datetime.today()
             if options["description"]:
                 destinationscenario.description = options["description"]
                 destinationscenario.save(
-                    update_fields=["status", "lastrefresh", "description"],
+                    update_fields=["status", "description"],
                     using=DEFAULT_DB_ALIAS,
                 )
             else:
                 destinationscenario.save(
-                    update_fields=["status", "lastrefresh"], using=DEFAULT_DB_ALIAS
+                    update_fields=["status"], using=DEFAULT_DB_ALIAS
                 )
 
             # Delete parameter that marks a running worker
@@ -581,16 +616,26 @@ class Command(BaseCommand):
             #  b) all active superusers from the source schema
             # unless it's a promotion
             if destination != DEFAULT_DB_ALIAS:
-                User.objects.using(destination).filter(
-                    is_superuser=True, is_active=True
-                ).update(is_active=True)
-                User.objects.using(destination).filter(is_superuser=False).update(
-                    is_active=False
-                )
-                if user:
-                    User.objects.using(destination).filter(
-                        username=user.username
-                    ).update(is_active=True)
+                # Read all superusers from the source database
+                access_allowed = [
+                    u["id"]
+                    for u in User.objects.using(source)
+                    .filter(is_superuser=True)
+                    .only("id")
+                    .values("id")
+                ]
+                if user and not user.is_superuser:
+                    access_allowed.append(user.pk)
+                with connections[DEFAULT_DB_ALIAS].cursor() as cursor:
+                    cursor.execute(
+                        """
+                        update common_user 
+                        set databases = array_append(databases, %s) 
+                        where (databases is null or not %s = any(databases))
+                        and id = any(%s)
+                        """,
+                        (destination, destination, access_allowed),
+                    )
 
             # Delete data files present in the scenario folders
             if destination != DEFAULT_DB_ALIAS and settings.DATABASES[destination][
@@ -639,8 +684,8 @@ class Command(BaseCommand):
             if not options["dumpfile"]:
                 Task.objects.all().using(destination).filter(id__gt=task.id).delete()
 
-            # Don't automate any task in the new copy
             if not promote:
+                # Don't automate any task in the new copy
                 for i in ScheduledTask.objects.all().using(destination):
                     i.next_run = None
                     i.data.pop("starttime", None)
@@ -652,6 +697,15 @@ class Command(BaseCommand):
                     i.data.pop("saturday", None)
                     i.data.pop("sunday", None)
                     i.save(using=destination)
+
+                # Remove links to log files from other scenario (except when restoring
+                # in the same scenario as where the dump was made)
+                if not (
+                    options["dumpfile"] and f".{destination}." in options["dumpfile"]
+                ):
+                    Task.objects.using(destination).filter(
+                        logfile__isnull=False
+                    ).update(logfile=None)
 
             if options["dumpfile"]:
                 setattr(_thread_locals, "database", destination)
@@ -668,13 +722,9 @@ class Command(BaseCommand):
                 else:
                     destinationscenario.status = "Free"
                 destinationscenario.save(
-                    update_fields=[
-                        "status",
-                    ],
-                    using=DEFAULT_DB_ALIAS,
+                    update_fields=["status"], using=DEFAULT_DB_ALIAS
                 )
             raise e
-
         finally:
             if task:
                 task.processid = None
@@ -683,7 +733,7 @@ class Command(BaseCommand):
 
     # accordion template
     title = _("scenario management")
-    index = 1500
+    index = 1300
     help_url = "command-reference.html#scenario-copy"
 
     @staticmethod
@@ -691,54 +741,30 @@ class Command(BaseCommand):
         # Synchronize the scenario table with the settings
         Scenario.syncWithSettings()
 
-        scenarios = Scenario.objects.using(DEFAULT_DB_ALIAS)
-        if scenarios.count() <= 1:
+        # Collect scenario status
+        scenarios = []
+        active_scenarios = []
+        free_scenarios = 0
+        for i in Scenario.objects.using(DEFAULT_DB_ALIAS):
+            scenarios.append(i)
+            if i.name in (request.user.databases or []):
+                active_scenarios.append(i.name)
+            if i.status == "Free":
+                free_scenarios += 1
+
+        # Deactivate this task when either:
+        # - There is only 1 scenario
+        # - All scenarios are in use and this user is active in only a single one
+        if len(scenarios) <= 1 or (not free_scenarios and len(active_scenarios) == 1):
             return None
 
-        release_perm = []
-        copy_perm = []
-        promote_perm = []
-        active_scenarios = []
-        free_scenarios = []
-        in_use_scenarios = []
+        # Look for dump files in the log folder of production
         dumps = []
-
-        default_db_not_empty = Item.objects.using(DEFAULT_DB_ALIAS).count() > 0
-
-        # look for dump files in the log folder of production
         for f in sorted(os.listdir(settings.FREPPLE_LOGDIR)):
             if os.path.isfile(
                 os.path.join(settings.FREPPLE_LOGDIR, f)
             ) and f.lower().endswith(".dump"):
                 dumps.append(f)
-
-        for scenario in scenarios:
-            try:
-                user = User.objects.using(scenario.name).get(
-                    username=request.user.username
-                )
-
-                if scenario.status != "Free":
-                    in_use_scenarios.append(scenario.name)
-                else:
-                    free_scenarios.append(scenario.name)
-
-                if user.has_perm("common.release_scenario"):
-                    release_perm.append(scenario.name)
-                if default_db_not_empty and user.has_perm("common.promote_scenario"):
-                    promote_perm.append(scenario.name)
-                if user.has_perm("common.copy_scenario"):
-                    copy_perm.append(scenario.name)
-                if user.is_active:
-                    active_scenarios.append(scenario.name)
-            except Exception:
-                # database schema is not properly created, scenario is free
-                free_scenarios.append(scenario.name)
-                active_scenarios.append(scenario.name)
-
-        # If all scenarios are in use and user is inactive in all of them then he won't see the scenario management menu
-        if len(free_scenarios) == 0 and len(active_scenarios) == 1:
-            return None
 
         return render_to_string(
             "commands/scenario_copy.html",
@@ -746,11 +772,7 @@ class Command(BaseCommand):
                 "scenarios": scenarios,
                 "DEFAULT_DB_ALIAS": DEFAULT_DB_ALIAS,
                 "current_database": request.database,
-                "release_perm": release_perm,
-                "copy_perm": copy_perm,
-                "promote_perm": promote_perm,
                 "active_scenarios": active_scenarios,
-                "free_scenarios": free_scenarios,
                 "dumps": dumps,
                 "THEMES": settings.THEMES,
             },

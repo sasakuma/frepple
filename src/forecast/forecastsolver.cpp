@@ -189,10 +189,10 @@ PyObject* ForecastSolver::solve(PyObject* self, PyObject* args,
   int run_netting = 1;
   int cluster = -1;
   PyObject* dem = nullptr;
-  int ok = PyArg_ParseTupleAndKeywords(args, kwargs, "|pipO:solve",
-                                       const_cast<char**>(kwlist), &run_fcst,
-                                       &cluster, &run_netting, &dem);
-  if (!ok) return nullptr;
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|pipO:solve",
+                                   const_cast<char**>(kwlist), &run_fcst,
+                                   &cluster, &run_netting, &dem))
+    return nullptr;
   if (dem && !PyObject_TypeCheck(dem, Demand::metadata->pythonClass) &&
       !PyObject_TypeCheck(dem, Forecast::metadata->pythonClass)) {
     PyErr_SetString(PythonDataException,
@@ -235,6 +235,18 @@ void ForecastSolver::solve(bool run_fcst, bool run_netting, int cluster) {
     if (cluster != -1 &&
         (!f->isLeaf() || static_cast<Forecast*>(&*f)->getCluster() != cluster))
       continue;
+
+    // if you are not planned and none of your chilren is planned
+    // we are below the valid forecast combinations
+    // for the forecastnet and forecastconsumed measures
+    bool childrenPlanned = false;
+    for (auto ch = f->getLeaves(true, Measures::forecastnet); ch; ++ch)
+      if (ch->getPlanned()) {
+        childrenPlanned = true;
+        break;
+      }
+    if (!childrenPlanned) continue;
+
     auto fcstdata = f->getData();
     lock_guard<recursive_mutex> exclusive(fcstdata->lock);
     for (auto& bckt : fcstdata->getBuckets()) {

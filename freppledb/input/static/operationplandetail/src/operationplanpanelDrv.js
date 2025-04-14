@@ -32,7 +32,7 @@ function showoperationplanDrv($window, gettextCatalog) {
 
   var directive = {
     restrict: 'EA',
-    scope: true,
+    scope: {operationplan: '=data'},
     templateUrl: '/static/operationplandetail/operationplanpanel.html',
     link: linkfunc
   };
@@ -50,7 +50,7 @@ function showoperationplanDrv($window, gettextCatalog) {
     }
 
     scope.$on("cardChanged", function (event, field, oldvalue, newvalue) {
-      if (!scope.operationplan)
+      if (typeof scope.operationplan == undefined)
         return;
       else if (field === "startdate")
         scope.operationplan["start"] = newvalue;
@@ -88,6 +88,9 @@ function showoperationplanDrv($window, gettextCatalog) {
       angular.element(elem).find("#statusrow").css(
         "display", (scope.operationplan.status && scope.operationplan.type !== 'STCK') ? "table-row" : "none"
       );
+      angular.element(elem).find('.collapse')
+        .on("shown.bs.collapse", grid.saveColumnConfiguration)
+        .on("hidden.bs.collapse", grid.saveColumnConfiguration);
     }); //watch end
 
   } //link end

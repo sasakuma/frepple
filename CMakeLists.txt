@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.16)
 # The version is defined in 2 places:
 #  - pyproject.toml
 #  - this file, next line
-project(frepple VERSION 9.5.0)
+project(frepple VERSION 9.8.0)
 
 set(PROJECT_EDITION "Community Edition")
 set(PROJECT_BRANCH "community")
@@ -116,6 +116,7 @@ else()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=date-time")
   set(CMAKE_CXX_FLAGS_PROFILING "${CMAKE_CXX_FLAGS_DEBUG} -DNDEBUG")
   set(CMAKE_C_FLAGS_PROFILING "${CMAKE_C_FLAGS_DEBUG} -DNDEBUG")
+  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Wuninitialized -Wunused -Wswitch")
   set(CMAKE_EXE_LINKER_FLAGS_PROFILING "")
   set(CMAKE_SHARED_LINKER_FLAGS_PROFILING "")
 endif()

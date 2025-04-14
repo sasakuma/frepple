@@ -76,12 +76,15 @@ void SolverCreate::solve(const Demand* salesorder, void* v) {
         if (m->getQuantity() - m->getPlannedQuantity() > ROUNDING_ERROR &&
             m->getDue() < Date::infiniteFuture &&
             (m->getStatus() == Demand::STATUS_OPEN ||
-             m->getStatus() == Demand::STATUS_QUOTE)) {
+             m->getStatus() == Demand::STATUS_QUOTE ||
+             (m->getStatus() == Demand::STATUS_INQUIRY &&
+              salesorder->getStatus() == Demand::STATUS_INQUIRY))) {
           salesorderlines.push_back(&*m);
         }
     } else if (salesorder->getQuantity() - salesorder->getPlannedQuantity() >
                    ROUNDING_ERROR &&
-               salesorder->getDue() < Date::infiniteFuture)
+               salesorder->getDue() < Date::infiniteFuture &&
+               salesorder->getStatus() != Demand::STATUS_INQUIRY)
       salesorderlines.push_back(const_cast<Demand*>(salesorder));
     if (salesorderlines.empty()) {
       if (loglevel > 0) logger << "  Nothing to be planned." << endl;
@@ -105,7 +108,6 @@ void SolverCreate::solve(const Demand* salesorder, void* v) {
     Date next_delivery_date = delivery_date;
     Demand* group_buster = nullptr;
     do {
-      auto groupcommand = data->getCommandManager()->setBookmark();
       bool group_ok = true;
 
       for (auto l : salesorderlines) {
@@ -364,7 +366,7 @@ void SolverCreate::solve(const Demand* salesorder, void* v) {
                 (data->state->a_qty + ROUNDING_ERROR < minshipment &&
                  !data->state->forceAccept) ||
                 (plan_qty - data->state->a_qty < minshipment &&
-                 fabs(plan_qty - data->state->a_qty) > ROUNDING_ERROR &&
+                 data->state->a_qty < plan_qty - ROUNDING_ERROR &&
                  !data->state->forceAccept)) {
               if (plan_qty - data->state->a_qty < minshipment &&
                   data->state->a_qty + ROUNDING_ERROR >= minshipment &&

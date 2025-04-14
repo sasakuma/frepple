@@ -26,7 +26,7 @@ import json
 from django.conf import settings
 from django.contrib.admin.views.decorators import staff_member_required
 from django.db import connections, transaction
-from django.http import HttpResponseForbidden, HttpResponse, HttpResponseBadRequest
+from django.http import HttpResponseForbidden, HttpResponseBadRequest, JsonResponse
 from django.utils.translation import gettext_lazy as _
 from django.utils.encoding import force_str
 from django.utils.text import capfirst
@@ -376,7 +376,7 @@ class OverviewReportWithForecast(GridPivot):
           inner join demand on demand.item_id = child.name and demand.status in ('open','quote') and due < %%s
           group by item.name
           union all
-          select item.name, 0::numeric qty_orders, coalesce(sum((forecastplan.value->>'forecastnet')::numeric),0) qty_forecast
+          select item.name, 0::numeric qty_orders, coalesce(sum(forecastplan.forecastnet),0) qty_forecast
           from forecastplan
           left outer join common_parameter cp on cp.name = 'forecast.DueWithinBucket'
           inner join (%s) item on forecastplan.item_id = item.name
@@ -473,7 +473,7 @@ class OverviewReportWithForecast(GridPivot):
             ) cte_reasons
             ) reasons,
           coalesce((
-            select sum((forecastplan.value->>'forecastnet')::numeric)
+            select sum(forecastplan.forecastnet)
             from forecastplan
             left outer join common_parameter cp on cp.name = 'forecast.DueWithinBucket'
             where forecastplan.item_id = parent.name
@@ -574,89 +574,103 @@ else:
         pass
 
 
-@staff_member_required
 def OperationPlans(request):
-    # Check permissions
     if (
         request.method != "GET"
         or request.headers.get("x-requested-with") != "XMLHttpRequest"
     ):
         return HttpResponseBadRequest("Only ajax get requests allowed")
-    if not request.user.has_perm("view_demand_report"):
+    if not request.user.has_perm("auth.view_demand_report"):
         return HttpResponseForbidden("<h1>%s</h1>" % _("Permission denied"))
 
     # Collect list of selected sales orders
     so_list = request.GET.getlist("demand")
 
     # Collect operationplans associated with the sales order(s)
-    id_list = []
-    for dm in (
-        Demand.objects.all().using(request.database).filter(pk__in=so_list).only("plan")
-    ):
-        for op in dm.plan["pegging"]:
-            id_list.append(op["opplan"])
-
-    # Collect details on the operationplans
-    result = []
-    for o in (
-        PurchaseOrder.objects.all()
-        .using(request.database)
-        .filter(id__in=id_list, status="proposed")
-    ):
-        result.append(
-            {
-                "id": o.id,
-                "type": "PO",
-                "item": o.item.name,
-                "location": o.location.name,
-                "origin": o.supplier.name,
-                "startdate": str(o.startdate.date()),
-                "enddate": str(o.enddate.date()),
-                "quantity": float(o.quantity),
-                "value": float(o.quantity * o.item.cost),
-                "criticality": float(o.criticality),
-            }
-        )
-    for o in (
-        DistributionOrder.objects.all()
-        .using(request.database)
-        .filter(id__in=id_list, status="proposed")
-    ):
-        result.append(
-            {
-                "id": o.id,
-                "type": "DO",
-                "item": o.item.name,
-                "location": o.location.name,
-                "origin": o.origin.name,
-                "startdate": str(o.startdate),
-                "enddate": str(o.enddate),
-                "quantity": float(o.quantity),
-                "value": float(o.quantity * o.item.cost),
-                "criticality": float(o.criticality),
-            }
-        )
-    for o in (
-        ManufacturingOrder.objects.all()
-        .using(request.database)
-        .filter(id__in=id_list, status="proposed")
-    ):
-        result.append(
-            {
-                "id": o.id,
-                "type": "MO",
-                "item": "",
-                "location": o.operation.location.name,
-                "origin": o.operation.name,
-                "startdate": str(o.startdate.date()),
-                "enddate": str(o.enddate.date()),
-                "quantity": float(o.quantity),
-                "value": "",
-                "criticality": float(o.criticality),
-            }
+    result = {
+        "PO": [],
+        "DO": [],
+        "MO": [],
+    }
+    with connections[request.database].cursor() as cursor:
+        cursor.execute(
+            """
+            select operationplan.reference,
+            operationplan.type,
+            operationplan.item_id,
+            case when operationplan.type = 'DO' then operationplan.destination_id
+            else operationplan.location_id end as location_id,
+            operationplan.origin_id,
+            operationplan.startdate,
+            operationplan.enddate,
+            operationplan.quantity,
+            operationplan.quantity * item.cost as value,
+            operationplan.status,
+            case when operationplan.type = 'PO' then operationplan.supplier_id else operationplan.operation_id end
+            from operationplan
+            inner join item on item.name = operationplan.item_id and item.source is not null
+            where operationplan.plan->'pegging' ?| %s
+            and operationplan.type in ('PO','DO','MO')
+            and operationplan.status in ('proposed', 'approved')
+            and operationplan.owner_id is null
+            and case when operationplan.type = 'MO'
+			then exists (select 1 from operation where operationplan.operation_id = operation.name and operation.source is not null)
+			when operationplan.type = 'DO'
+			then exists (select 1 from location where operationplan.origin_id = location.name and location.source is not null)
+			and exists (select 1 from location where operationplan.destination_id = location.name and location.source is not null)
+			else true end = true
+            order by operationplan.type, operationplan.startdate
+            """,
+            (so_list,),
         )
 
-    return HttpResponse(
-        content=json.dumps(result),
-        content_type="application/json; charset=%s" % settings.DEFAULT_CHARSET,
-    )
+        po_ok = request.user.has_perm("input.change_purchaseorder")
+        do_ok = request.user.has_perm("input.change_distributionorder")
+        mo_ok = request.user.has_perm("input.change_manufacturingorder")
+
+        for i in cursor:
+
+            if i[1] == "MO" and not mo_ok:
+                continue
+
+            if i[1] == "PO" and not po_ok:
+                continue
+
+            if i[1] == "DO" and not do_ok:
+                continue
+
+            l = [
+                # ["fieldname", value, hidden, value type]
+                # front-end relies on the fact that the reference is the first of the list
+                [_("reference"), i[0], 0, "text"],
+                [_("item"), i[2], 0, "text"],
+                [_("destination") if i[1] == "DO" else _("location"), i[3], 0, "text"],
+                [
+                    (
+                        _("start date")
+                        if i[1] == "MO"
+                        else (
+                            _("ordering date") if i[1] == "PO" else _("shipping date")
+                        )
+                    ),
+                    i[5],
+                    0,
+                    "date",
+                ],
+                [_("end date") if i[1] == "MO" else _("receipt date"), i[6], 0, "date"],
+                [_("quantity"), i[7], 0, "number"],
+                [_("value"), i[8], 0, "number"],
+                [_("status"), _(i[9]), 0, "text"],
+            ]
+            if i[1] == "DO":
+                l.insert(
+                    2,
+                    [_("origin"), i[4], 0],
+                )
+            elif i[1] == "MO":
+                l.insert(3, [_("operation"), i[10], 0])
+            elif i[1] == "PO":
+                l.insert(3, [_("supplier"), i[10], 0])
+
+            result[i[1]].append(l)
+    return JsonResponse(result)

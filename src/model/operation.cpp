@@ -253,8 +253,7 @@ void Operation::setFence(Date d) {
 PyObject* Operation::setFencePython(PyObject* self, PyObject* args) {
   // Pick up the date argument
   PyObject* pydate;
-  int ok = PyArg_ParseTuple(args, "O:setFence", &pydate);
-  if (!ok) return nullptr;
+  if (!PyArg_ParseTuple(args, "O:setFence", &pydate)) return nullptr;
 
   try {
     PythonData dt(pydate);
@@ -2189,7 +2188,8 @@ double Operation::setOperationPlanQuantity(OperationPlan* oplan, double f,
     if (curmin < getSizeMinimum())
       // Minimum is constant
       curmin = getSizeMinimum();
-    if (f != 0.0 && curmin > 0.0 && f <= curmin - ROUNDING_ERROR) {
+    if (f != 0.0 && curmin > 0.0 && f <= curmin - ROUNDING_ERROR &&
+        curmin <= getSizeMaximum()) {
       if (roundDown) {
         // Smaller than the minimum quantity, rounding down means... nothing
         if (!execute) return 0.0;
@@ -2215,7 +2215,7 @@ double Operation::setOperationPlanQuantity(OperationPlan* oplan, double f,
       double mult =
           floor(f / getSizeMultiple() + (roundDown ? 0.0 : 0.99999999));
       double q = mult * getSizeMultiple();
-      if (q < curmin) {
+      if (q < curmin && curmin <= getSizeMaximum()) {
         if (roundDown) {
           // Smaller than the minimum quantity, rounding down means... nothing
           if (!execute) return 0.0;
@@ -2429,7 +2429,6 @@ pair<Duration, Date> OperationRouting::getDecoupledLeadTime(
   for (auto sub = getSubOperations().rbegin(); sub != getSubOperations().rend();
        ++sub) {
     Duration maxSub;
-    Date endSub = startdate;
     Operation* suboper = (*sub)->getOperation();
 
     // Find the longest supply path for all flows
@@ -2539,8 +2538,8 @@ PyObject* Operation::getDecoupledLeadTimePython(PyObject* self,
   double qty = 1.0;
   PyObject* py_startdate = nullptr;
   Date startdate = Plan::instance().getCurrent();
-  int ok = PyArg_ParseTuple(args, "|dO:decoupledLeadTime", &qty, &py_startdate);
-  if (!ok) return nullptr;
+  if (!PyArg_ParseTuple(args, "|dO:decoupledLeadTime", &qty, &py_startdate))
+    return nullptr;
   if (py_startdate) startdate = PythonData(py_startdate).getDate();
 
   try {

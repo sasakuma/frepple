@@ -381,19 +381,20 @@ pair<double, double> FlowPlan::setQuantity(double quantity, bool rounddown,
                                 (quantity - getFlow()->getQuantityFixed()) /
                                     getFlow()->getQuantity(),
                                 Date::infinitePast,
-                                computeFlowToOperationDate(oper->getEnd()),
+                                (mode == 2 || getFlow()->hasType<FlowStart>())
+                                    ? oper->getEnd()
+                                    : computeFlowToOperationDate(getDate()),
                                 true, execute, rounddown)
                             .quantity;
     else if (mode == 1 || (mode == 0 && getFlow()->hasType<FlowStart>()))
-      opplan_quantity =
-          oper->setOperationPlanParameters(
-                  (quantity - getFlow()->getQuantityFixed()) /
-                      getFlow()->getQuantity(),
-                  (mode == 1 && getFlow()->hasType<FlowEnd>())
-                      ? oper->getStart()
-                      : computeFlowToOperationDate(oper->getStart()),
-                  Date::infinitePast, false, execute, rounddown)
-              .quantity;
+      opplan_quantity = oper->setOperationPlanParameters(
+                                (quantity - getFlow()->getQuantityFixed()) /
+                                    getFlow()->getQuantity(),
+                                (mode == 1 || getFlow()->hasType<FlowEnd>())
+                                    ? oper->getStart()
+                                    : computeFlowToOperationDate(getDate()),
+                                Date::infinitePast, false, execute, rounddown)
+                            .quantity;
     else
       throw LogicException("Unreachable code reached");
   }
@@ -555,18 +556,61 @@ PyObject* FlowPlan::create(PyTypeObject* pytype, PyObject* args,
 }
 
 Duration FlowPlan::getPeriodOfCover() const {
-  double left_for_consumption = getOnhand();
-  if (left_for_consumption < ROUNDING_ERROR) return Duration(0L);
+  // Case 1: If the backlog is more than the onhand => period of cover is 0
+  // We consider the initial stock - all confirmed consumptions - all overdue
+  // demand
+  double left_for_consumption = getBuffer()->getOnHand();
   auto fpiter = getBuffer()->getFlowPlans().begin(this);
-  ++fpiter;
+  fpiter++;
+  bool found = false;
   while (fpiter != getBuffer()->getFlowPlans().end()) {
-    if (fpiter->getQuantity() < 0.0) {
+    // subtract deliveries
+    if (fpiter->getQuantity() < 0.0 && fpiter->getDate() >= getDate() &&
+        fpiter->getOperationPlan()
+            ->getOperation()
+            ->hasType<OperationDelivery>() &&
+        fpiter->getOperationPlan()->getDemand()->getDue() < getDate()) {
       left_for_consumption += fpiter->getQuantity();
-      if (left_for_consumption < ROUNDING_ERROR)
-        return fpiter->getDate() - getDate();
+      found = true;
     }
+    // add confirmed/completed/approved replenishments
+    if (fpiter->getQuantity() > 0.0 &&
+        fpiter->getDate() <= getDate() + Duration(1L) &&
+        (fpiter->getOperationPlan()->getStatus() == "approved" ||
+         fpiter->getOperationPlan()->getStatus() == "confirmed" ||
+         fpiter->getOperationPlan()->getStatus() == "completed"))
+      left_for_consumption += fpiter->getQuantity();
     ++fpiter;
   }
+  if (found && left_for_consumption < ROUNDING_ERROR) return Duration(0L);
+
+  // Case 2: Regular case
+  left_for_consumption = getOnhand();
+  if (left_for_consumption > 0) {
+    auto fpiter2 = getBuffer()->getFlowPlans().begin(this);
+    ++fpiter2;
+    while (fpiter2 != getBuffer()->getFlowPlans().end()) {
+      if (fpiter2->getQuantity() < 0.0) {
+        left_for_consumption += fpiter2->getQuantity();
+        if (left_for_consumption < ROUNDING_ERROR)
+          return fpiter2->getDate() - getDate();
+      }
+      ++fpiter2;
+    }
+  } else {
+    // Case 3:
+    // On hand is 0 so we display the next consumer's date
+    auto fpiter2 = getBuffer()->getFlowPlans().begin(this);
+    ++fpiter2;
+    while (fpiter2 != getBuffer()->getFlowPlans().end()) {
+      if (fpiter2->getQuantity() < 0.0) {
+        return max(0L, fpiter2->getDate() - getDate() -
+                           fpiter2->getOperationPlan()->getDelay());
+      }
+      ++fpiter2;
+    }
+  }
+
   return Duration(999L * 86400L);
 }
 

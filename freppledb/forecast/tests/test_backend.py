@@ -35,6 +35,7 @@ from django.db import DEFAULT_DB_ALIAS, connections
 
 from freppledb.common.models import Parameter, User
 from freppledb.common.tests import checkResponse
+from freppledb.execute.models import Task
 from freppledb.input.models import Item, Location, Customer
 
 if "freppledb.forecast" in settings.INSTALLED_APPS:
@@ -602,8 +603,8 @@ class ForecastSimulation(TransactionTestCase):
             (
             select
               startdate,
-              greatest(coalesce((value->>'forecasttotal')::numeric,0),0) fcst,
-              greatest(coalesce((value->>'orderstotal')::numeric,0) + coalesce((value->>'ordersadjustment')::numeric,0),0) orders
+              greatest(coalesce(forecastplan.forecasttotal,0),0) fcst,
+              greatest(coalesce(forecastplan.orderstotal,0) + coalesce(forecastplan.ordersadjustment,0),0) orders
             from forecastplan
             inner join forecast
               on forecastplan.item_id = forecast.item_id
@@ -630,3 +631,39 @@ class ForecastSimulation(TransactionTestCase):
         self.assertAlmostEqual(
             first=errorSum, second=Decimal(405.74), delta=Decimal(5.0)
         )
+
+
+@unittest.skipUnless(
+    "freppledb.forecast" in settings.INSTALLED_APPS, "App not activated"
+)
+class HierarchyTest(TransactionTestCase):
+    fixtures = ["manufacturing_demo"]
+
+    def setUp(self):
+        os.environ["FREPPLE_TEST"] = "YES"
+        param = Parameter.objects.all().get_or_create(pk="cache.loglevel")[0]
+        param.value = "9"
+        param.save()
+
+    def tearDown(self):
+        del os.environ["FREPPLE_TEST"]
+
+    def test_hierarchy(self):
+
+        # Run a plan with forecast and supply
+        management.call_command("runplan", env="fcst,supply")
+
+        # Then restart the web service
+        management.call_command("runplan", env="loadplan")
+
+        # find the log file
+        task = Task.objects.all().order_by("-id")[0]
+        logfile = os.path.join(settings.FREPPLE_LOGDIR, task.logfile)
+
+        # And make sure no correction is made to the hierarchy
+        with open(logfile, "r") as f:
+            content = f.read()
+            self.assertTrue(
+                "Corrected 0 parent forecast buckets" in content
+                and "reads and 0 writes" in content
+            )

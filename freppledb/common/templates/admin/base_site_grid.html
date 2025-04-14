@@ -7,16 +7,18 @@
 &nbsp;
 <div class="input-group d-inline-flex w-auto">
 <input id="addsearch" class="form-control ps-2 pe-2" placeholder="{% trans 'Filter' %}" role="searchbox"
-  type="text" size="15" oninput="grid.showFilterList(this)" onkeydown="grid.keyDownSearch(event)">
-<button class="input-group-text" onclick="event.stopPropagation(); grid.showFilter()"
+  type="text" size="15" oninput="grid.showFilterConfig(event)" onkeydown="grid.keyDownSearch(event)">
+<button class="input-group-text" onclick="event.stopPropagation(); grid.showFilter()" data-bs-offset="0,5"
   type="button" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="{% trans "Filter editor" %}">
   <i class="fa fa-search"></i>
 </button>
 	{% if reportclass.filterable %}{% include "common/snippet_favorites.html" with search=True %}{% endif %}
 </div>
-<div class="align-middle d-inline-flex" data-bs-toggle="tooltip" data-bs-placement="top"
+<div class="align-middle d-inline-flex" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-offset="0,5"
   data-bs-title="{% trans 'reset filters'|capfirst|force_escape %}">
-   <span id="resetfilter" onclick="grid.resetFilter()" class="fa fa-times fs-6" ></span>
+  <div>
+    <i id="resetfilter" onclick="grid.resetFilter()" class="fa fa-times fs-6" ></i>
+  </div>
 </div>
 </span>
 {% endif %}{% endblock %}
@@ -42,6 +44,29 @@ var actions = { {% for i in actions %}
    };
 
 function displayGrid(load) {
+  $(document).keydown(function(e) {
+    // Check if Ctrl key is pressed and the 'A' key is pressed
+    if (e.ctrlKey && e.key === 'a') {
+        e.preventDefault();  // Prevent default behavior (selecting all text)
+        // Get all row IDs
+        var rowIds = $("#grid").jqGrid('getDataIDs');
+        // Get the array of currently selected row IDs
+        var selectedRowIds = $("#grid").jqGrid('getGridParam', 'selarrrow');
+
+        // Loop through all row IDs
+        for (var i = 0; i < rowIds.length; i++) {
+            var rowId = rowIds[i];
+
+            // Check if the row is already selected
+            if ($.inArray(rowId, selectedRowIds) === -1) {
+                // Select the row if it's not already selected
+                $("#grid").jqGrid('setSelection', rowId);
+            }
+        }
+        // After selecting all rows, select the header checkbox
+        $("#grid").closest('div.ui-jqgrid').find('input[type="checkbox"]').prop('checked', true);
+    }
+});
   jQuery("#grid").jqGrid({
    	url: (location.href.indexOf("#") != -1 ? location.href.substr(0,location.href.indexOf("#")) : location.href)
    	  + (location.search.length > 0 ? "&format=json" : "?format=json"),
@@ -85,7 +110,7 @@ function displayGrid(load) {
     onSortCol: grid.saveColumnConfiguration,
     onPaging: grid.saveColumnConfiguration,
     //scroll: 1,      // Enables scrolling over all records, instead of paging. But not compatible with frozen columns.
-    //sortable: true, // Allows columns to be dragged and dropped between positions. But not compatible with frozen columns
+    sortable: true, // Allows columns to be dragged and dropped between positions. But not compatible with frozen columns
     autowidth: true,
     postData: initialfilter ? {filters: JSON.stringify(initialfilter)} : {},
     search : true,
@@ -100,21 +125,23 @@ function displayGrid(load) {
       width: 700
     },
     gridComplete: function() {
-      tooltipList.forEach(function (t) {
-        try{
-          t.dispose();
+      let gridCells = document.querySelectorAll('#grid td');
+      for (let elem of gridCells) {
+        if (!elem.hasAttribute('data-bs-toggle') && elem.scrollWidth > elem.clientWidth) {
+          elem.setAttribute('data-bs-toggle', 'tooltip');
+          elem.setAttribute('data-bs-title', elem.textContent);
+          elem.setAttribute('data-bs-placement', 'left');
         }
-        catch {}
-      });
-      var tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
-      tooltipList = [...tooltipTriggerList].map(
-          el => new bootstrap.Tooltip(el, {
-            container: 'body',
-            trigger : 'hover',
-            delay: el.hasAttribute("data-bs-delay") ? JSON.parse(el.getAttribute("data-bs-delay")) : { "show": 500, "hide": 1000 }
-          })
-          );
-      },
+      }
+      var gridTooltipTriggerList = document.querySelectorAll('#grid [data-bs-toggle="tooltip"]');
+      window.gridTooltipList = [...gridTooltipTriggerList].map(
+        el => new bootstrap.Tooltip(el, {
+          container: 'body',
+          trigger : 'hover',
+          delay: el.hasAttribute("data-bs-delay") ? JSON.parse(el.getAttribute("data-bs-delay")) : { "show": 500, "hide": 1000 }
+        })
+      );
+    },
     loadError: function(xhr,st,err) {
       if (xhr.status == 401) {
         location.reload();
@@ -128,7 +155,7 @@ function displayGrid(load) {
         $('#curerror').html("{{_('Error')|escapejs}}" + ":&nbsp;" + xhr.status + "&nbsp;" + xhr.statusText);
     },{% if reportclass.editable and reportclass.multiselect and not is_popup and hasaddperm %}
     multiselect: true,
-    multiboxonly: true,
+    multiboxonly: false,
     noCellSelection: true,
     onSelectRow: function(rowid, status, e) {
       var selection = $(this).jqGrid('getGridParam','selarrrow').slice(); //this makes this list a static list of values
@@ -145,7 +172,11 @@ function displayGrid(load) {
             startId = $this.jqGrid('getGridParam', 'selrow'),
             startRow, endRow, iStart, iEnd, i;
 
-        if (!e.shiftKey) {
+      if (!e.shiftKey && !e.ctrlKey && !e.target.matches('[type="checkbox"]')){
+          $this.jqGrid('resetSelection');
+      }
+
+      if (!e.shiftKey) {
             return true;
         } else if (startId) {
 
@@ -232,7 +263,8 @@ function displayGrid(load) {
         {% else %}
           Math.max(150, $(window).height() - $("#grid").offset().top - {{reportclass.heightmargin}})
         {% endif %}
-    });{% if reportclass.frozenColumns > 0 %}
+    }).on("jqGridRemapColumns", function() {grid.saveColumnConfiguration()});
+    {% if reportclass.frozenColumns > 0 %}
   jQuery("#grid").jqGrid('setFrozenColumns');{% endif %}{% if reportclass.multiselect and not is_popup %}
   $('#cb_grid.cbox').click(grid.markAllRows);{% endif %}{% if reportclass.editable and haschangeperm %}
   $("th").bindFirst('click', upload.validateSort);{% endif %}
@@ -281,10 +313,11 @@ function displayGrid(load) {
 	  $("#horizonunit").val($(this).prop('name'));
 	});
 
-  $("#actionsul li a, button#actions1").click(function(){
+  $("#actionsul li a, button#actions1").click(function(event){
     $("#actions1 span").text($(this).text());
     $("#actions").val($(this).prop('name'));
     grid.runAction($(this).prop('name'));
+    event.preventDefault();
   });
 
   {% if reportclass.editable and reportclass.multiselect and not is_popup and hasaddperm %}

@@ -640,7 +640,6 @@ void SolverCreate::SolverData::maskTemporaryShortages() {
   for (auto& buf : Buffer::all())
     if ((buf.getCluster() == cluster || cluster == -1) &&
         !buf.hasType<BufferInfinite>() && buf.getProducingOperation()) {
-      bool manipulated = false;
       auto fence = Plan::instance().getAutoFence();
       if (!fence)
         // Autofence value of 0 doesn't mask any temporary shortages
@@ -681,7 +680,6 @@ void SolverCreate::SolverData::maskTemporaryShortages() {
               logger << "Warning: Masking temporary material shortage on '"
                      << buf.getName() << "' for " << opplan->getQuantity()
                      << " during " << opplan->getDates() << endl;
-            manipulated = true;
           }
         }
       }
@@ -721,8 +719,14 @@ void SolverCreate::solve(void* v) {
     if (!getConstraints()) {
       // Dumb unconstrained plan is running in a single thread
       for (auto& i : Demand::all())
-        if (i.getQuantity() > 0 && (i.getStatus() == Demand::STATUS_OPEN ||
-                                    i.getStatus() == Demand::STATUS_QUOTE))
+        if (i.getQuantity() > 0 &&
+            (i.getStatus() == Demand::STATUS_OPEN ||
+             i.getStatus() == Demand::STATUS_QUOTE ||
+             (i.getStatus() == Demand::STATUS_INQUIRY && i.getOwner() &&
+              i.getOwner()->hasType<DemandGroup>() &&
+              i.getOwner()->getStatus() == Demand::STATUS_INQUIRY &&
+              static_cast<DemandGroup*>(i.getOwner())->getPolicy() !=
+                  Demand::POLICY_INDEPENDENT)))
           demands_per_cluster[0].push_back(&i);
     } else if (cluster == -1 && !userexit_nextdemand) {
       // Many clusters to solve
@@ -736,7 +740,8 @@ void SolverCreate::solve(void* v) {
                 Demand::POLICY_INDEPENDENT;
         if ((isGroup || (i.getQuantity() > 0 && !isMemberOfGroup)) &&
             (i.getStatus() == Demand::STATUS_OPEN ||
-             i.getStatus() == Demand::STATUS_QUOTE))
+             i.getStatus() == Demand::STATUS_QUOTE ||
+             i.getStatus() == Demand::STATUS_INQUIRY))
           demands_per_cluster[i.getCluster()].push_back(&i);
       }
     } else if (!userexit_nextdemand) {
@@ -801,8 +806,9 @@ PyObject* SolverCreate::solve(PyObject* self, PyObject* args,
   static const char* kwlist[] = {"object", "cluster", nullptr};
   PyObject* dem = nullptr;
   int cluster = -1;
-  int ok = PyArg_ParseTupleAndKeywords(
-      args, kwargs, "|Oi:solve", const_cast<char**>(kwlist), &dem, &cluster);
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|Oi:solve",
+                                   const_cast<char**>(kwlist), &dem, &cluster))
+    return nullptr;
   if (dem && !PyObject_TypeCheck(dem, Demand::metadata->pythonClass) &&
       !PyObject_TypeCheck(dem, Buffer::metadata->pythonClass)) {
     PyErr_SetString(PythonDataException,
@@ -879,22 +885,6 @@ PyObject* SolverCreate::rollback(PyObject* self, PyObject* args) {
     SolverCreate* me = static_cast<SolverCreate*>(self);
     assert(me->commands.getCommandManager());
     me->commands.getCommandManager()->rollback();
-  } catch (...) {
-    Py_BLOCK_THREADS;
-    PythonType::evalException();
-    return nullptr;
-  }
-  // Reclaim Python interpreter
-  Py_END_ALLOW_THREADS;
-  return Py_BuildValue("");
-}
-
-PyObject* SolverCreate::createsBatches(PyObject* self, PyObject* args) {
-  // Free Python interpreter for other threads
-  Py_BEGIN_ALLOW_THREADS;
-  try {
-    SolverCreate* me = static_cast<SolverCreate*>(self);
-    for (auto& o : Operation::all()) me->createsBatches(&o, &me->getCommands());
   } catch (...) {
     Py_BLOCK_THREADS;
     PythonType::evalException();

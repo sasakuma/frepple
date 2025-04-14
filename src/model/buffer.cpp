@@ -792,15 +792,16 @@ Buffer* Buffer::findOrCreate(Item* itm, Location* loc,
   // Create a new buffer with a unique name
   stringstream o;
   o << itm->getName();
-  if (batch) o << " @ " << batch;
+  if (batch && itm->hasType<ItemMTO>()) o << " @ " << batch;
   o << " @ " << loc->getName();
-  Buffer* b;
-  while ((b = find(o.str()))) o << '*';
-  b = new BufferDefault();
-  b->setItem(itm, !batch);
-  b->setLocation(loc, !batch);
-  b->setName(o.str());
-  if (batch) {
+  Buffer* b = find(o.str());
+  if (!b) {
+    b = new BufferDefault();
+    b->setName(o.str());
+  }
+  b->setItem(itm, !batch && !itm->hasType<ItemMTO>());
+  b->setLocation(loc, !batch && !itm->hasType<ItemMTO>());
+  if (batch && itm->hasType<ItemMTO>()) {
     b->setBatch(batch);
     if (generic) b->copyLevelAndCluster(generic);
   }
@@ -1029,7 +1030,7 @@ void Buffer::buildProducingOperation() {
           }
         }
       } else {
-        // We are the first: only create an operationItemSupplier instance
+        // We are the first: only create an OperationItemDistribution instance
         if (itemdist->getEffective() == DateRange() &&
             itemdist->getPriority() == 1 &&
             oper->getSearch() == SearchMode::PRIORITY)
@@ -1067,10 +1068,17 @@ void Buffer::buildProducingOperation() {
       if (itemoper->getPriority() == 0) continue;
 
       // Verify whether the operation is applicable to the buffer
-      if (itemoper->getLocation() && itemoper->getLocation() != getLocation())
-        continue;
+      Location* l = itemoper->getLocation();
+      for (auto flow_iter = itemoper->getFlowIterator();
+           flow_iter != itemoper->getFlows().end(); ++flow_iter)
+        if (flow_iter->getItem() == getItem() && flow_iter->getLocation() &&
+            flow_iter->isProducer()) {
+          l = flow_iter->getLocation();
+          break;
+        }
+      if (l && l != getLocation()) continue;
 
-      // Make sure a producing Flow record exists
+      // Make sure a producing flow record exists
       correctProducingFlow(itemoper);
 
       // Check if there is already a producing operation referencing this
@@ -1205,7 +1213,9 @@ void Buffer::correctProducingFlow(Operation* itemoper) {
     // check if routing has a flow into the buffer
     for (auto flow_iter = itemoper->getFlowIterator();
          flow_iter != itemoper->getFlows().end(); ++flow_iter)
-      if (flow_iter->getItem() == getItem())
+      if (flow_iter->getItem() == getItem() &&
+          (!flow_iter->getLocation() ||
+           flow_iter->getLocation() == getLocation()))
         // Flow for this item exists, nothing to do
         return;
   }
@@ -1219,7 +1229,10 @@ void Buffer::correctProducingFlow(Operation* itemoper) {
     while (SubOperation* sub = subs.next()) {
       auto flow_iter = sub->getOperation()->getFlowIterator();
       while (flow_iter != sub->getOperation()->getFlows().end()) {
-        if (flow_iter->getItem() == getItem()) return;
+        if (flow_iter->getItem() == getItem() &&
+            (!flow_iter->getLocation() ||
+             flow_iter->getLocation() == getLocation()))
+          return;
         ++flow_iter;
       }
       lastStep = sub;
@@ -1248,7 +1261,9 @@ void Buffer::correctProducingFlow(Operation* itemoper) {
   auto flow_iter = itemoper->getFlowIterator();
   bool foundFlow = false;
   while (flow_iter != itemoper->getFlows().end()) {
-    if (flow_iter->getItem() == getItem()) {
+    if (flow_iter->getItem() == getItem() &&
+        (!flow_iter->getLocation() ||
+         flow_iter->getLocation() == getLocation())) {
       foundFlow = true;
       break;
     }
@@ -1283,8 +1298,8 @@ PyObject* Buffer::getDecoupledLeadTimePython(PyObject* self, PyObject* args) {
   double qty = 1.0;
   PyObject* py_startdate = nullptr;
   Date startdate = Plan::instance().getCurrent();
-  int ok = PyArg_ParseTuple(args, "|dO:decoupledLeadTime", &qty, &py_startdate);
-  if (!ok) return nullptr;
+  if (!PyArg_ParseTuple(args, "|dO:decoupledLeadTime", &qty, &py_startdate))
+    return nullptr;
   if (py_startdate) startdate = PythonData(py_startdate).getDate();
 
   try {
@@ -1299,8 +1314,7 @@ PyObject* Buffer::getDecoupledLeadTimePython(PyObject* self, PyObject* args) {
 
 PyObject* Buffer::availableOnhandPython(PyObject* self, PyObject* args) {
   PyObject* dateobj = nullptr;
-  int ok = PyArg_ParseTuple(args, "|O:availableonhand", &dateobj);
-  if (!ok) return nullptr;
+  if (!PyArg_ParseTuple(args, "|O:availableonhand", &dateobj)) return nullptr;
 
   try {
     Date refdate;

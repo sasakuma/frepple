@@ -31,7 +31,7 @@ import os
 import random
 import requests
 from requests import ConnectionError
-from threading import local
+from threading import Thread
 
 from django.conf import settings
 from django.core import management
@@ -43,7 +43,8 @@ from django.utils.translation import pgettext, gettext_lazy as _
 
 from freppledb.common.auth import getWebserviceAuthorization
 from freppledb.common.localization import parseLocalizedDateTime
-from freppledb.common.models import AuditModel, BucketDetail, Parameter
+from freppledb.common.models import AuditModel, BucketDetail, Parameter, Scenario
+from freppledb.common.utils import forceWsgiReload
 from freppledb.input.models import Customer, Item, Location, Operation
 from freppledb.webservice.utils import useWebService
 
@@ -313,7 +314,7 @@ class ForecastPlan(models.Model):
     def export_objects(cls, query, request):
         return query.extra(
             select={
-                m.name: "(value->>'%s')::numeric" % m.name
+                m.name: f"value.{m.name}"
                 for m in chain(
                     Measure.standard_measures(), Measure.objects.using(request.database)
                 )
@@ -427,7 +428,15 @@ class ForecastPlan(models.Model):
         managed = False
 
     @staticmethod
-    def parseData(data, rowmapper, user, database, ping, excel_duration_in_days=False):
+    def parseData(
+        data,
+        rowmapper,
+        user,
+        database,
+        ping,
+        excel_duration_in_days=False,
+        skip_audit_log=False,
+    ):
         """
         This method is called when importing forecast data through a CSV
         or Excel file.
@@ -446,13 +455,22 @@ class ForecastPlan(models.Model):
 
         # Need to assure that the web service is up and running
         if useWebService(database):
-            try:
-                # We need a trick to enforce using a new database connection and transaction
-                tmp = connections._connections
-                connections._connections = local()
-                management.call_command("runwebservice", database=database, wait=True)
-                connections._connections = tmp
-            except management.base.CommandError:
+            exc = None
+
+            def StartServiceThread():
+                nonlocal exc
+                try:
+                    management.call_command(
+                        "runwebservice", database=database, wait=True
+                    )
+                except Exception as e:
+                    exc = e
+
+            # We need a trick to enforce using a new database connection and transaction
+            t = Thread(target=StartServiceThread)
+            t.start()
+            t.join()
+            if exc:
                 yield (ERROR, None, None, None, "Web service didn't start")
                 raise StopIteration
         else:
@@ -620,16 +638,17 @@ class ForecastPlan(models.Model):
                     missing.append("startdate")
                 if missing:
                     errors += 1
+                    e = "Some keys were missing: %(keys)s" % {
+                        "keys": ", ".join(missing)
+                    }
                     yield (
                         ERROR,
                         None,
                         None,
                         None,
-                        _(
-                            "Some keys were missing: %(keys)s"
-                            % {"keys": ", ".join(missing)}
-                        ),
+                        _(e),
                     )
+                    raise Exception(e)
                 if pivotbuckets:
                     measures = [
                         m
@@ -886,6 +905,53 @@ class ForecastPlan(models.Model):
         # refresh materialized view in case new combinations have been added
         with connections[database].cursor() as cursor:
             cursor.execute("REFRESH MATERIALIZED VIEW forecastreport_view")
+
+    @staticmethod
+    def refreshTableColumns(database=DEFAULT_DB_ALIAS):
+        """
+        Adjust the forecastplan table to have a columnn for every measure.
+
+        This method is opening a database connection to all active scenarios,
+        and can have an impact on scalability. Call with care!
+        """
+        # Get a list with all expected columns
+        expected_columns = [
+            m.name for m in Measure.standard_measures() if not m.computed
+        ]
+        for m in Measure.objects.using(database).only("name"):
+            expected_columns.append(m.name)
+
+        # Check the forecastplan table
+        modified = False
+        with connections[database].cursor() as cursor:
+            cursor.execute(
+                """
+                select column_name
+                from information_schema.columns
+                where table_name = 'forecastplan'
+                and column_name not in (
+                    'item_id', 'location_id', 'customer_id', 'startdate', 'enddate'
+                    )
+                """
+            )
+            columns = [c[0] for c in cursor.fetchall()]
+            for m in expected_columns:
+                if m not in columns:
+                    cursor.execute(
+                        "alter table forecastplan add column if not exists %s decimal(20,8)"
+                        % m
+                    )
+                    modified = True
+            for c in columns:
+                if c not in expected_columns:
+                    cursor.execute(
+                        "alter table forecastplan drop column if exists %s" % c
+                    )
+                    modified = True
+
+        if modified:
+            # Trigger wsgi reload by importing from freppledb.common.utils.force
+            forceWsgiReload()
 
 
 class Measure(AuditModel):
@@ -1323,8 +1389,26 @@ class Measure(AuditModel):
         self._computed = value
 
     def clean(self):
-        if self.name and not self.name.isalnum():
-            raise ValidationError(_("Name can only be alphanumeric"))
+        if self.name and not (
+            self.name.isalnum() and self.name.islower() and self.name[0].isalpha()
+        ):
+            raise ValidationError(
+                _("Name can only be lowercase alphanumeric starting with a letter")
+            )
+
+    def save(self, *args, **kwargs):
+        # Call the real save() method
+        super().save(*args, **kwargs)
+
+        # Add or update the database schema
+        ForecastPlan.refreshTableColumns(database=self._state.db)
+
+    def delete(self, *args, **kwargs):
+        # Call the real save() method
+        super().delete(*args, **kwargs)
+
+        # Add or update the database schema
+        ForecastPlan.refreshTableColumns(database=self._state.db)
 
     class Meta(AuditModel.Meta):
         db_table = "measure"

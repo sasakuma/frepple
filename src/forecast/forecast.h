@@ -85,26 +85,30 @@ class ForecastMeasure : public HasName<ForecastMeasure> {
   ForecastMeasure() {}
 
   ForecastMeasure(const char* n, double d = 0.0, bool cmptd = false,
-                  bool aggr = true, bool temp = false)
-      : dflt(d), computed(cmptd), aggregate(aggr), temporary(temp) {
+                  bool aggr = true, bool temp = false, bool st = true)
+      : dflt(d), computed(cmptd), aggregate(aggr), temporary(temp), stored(st) {
     setName(n);
   }
 
   ForecastMeasure(const PooledString& n, double d = 0.0, bool cmptd = false,
-                  bool aggr = true, bool temp = false)
-      : dflt(d), computed(cmptd), aggregate(aggr), temporary(temp) {
+                  bool aggr = true, bool temp = false, bool st = true)
+      : dflt(d), computed(cmptd), aggregate(aggr), temporary(temp), stored(st) {
     setName(n);
   }
 
   ForecastMeasure(const string& n, double d = 0.0, bool cmptd = false,
-                  bool aggr = true, bool temp = false)
-      : dflt(d), computed(cmptd), aggregate(aggr), temporary(temp) {
+                  bool aggr = true, bool temp = false, bool st = true)
+      : dflt(d), computed(cmptd), aggregate(aggr), temporary(temp), stored(st) {
     setName(n);
   }
 
   double getDefault() const { return dflt; }
 
   void setDefault(double v) { dflt = v; }
+
+  bool getStored() const { return stored; }
+
+  void setStored(bool v) { stored = v; }
 
   void setComputed(bool c) { computed = c; }
 
@@ -208,6 +212,7 @@ class ForecastMeasure : public HasName<ForecastMeasure> {
   bool aggregate = true;
   bool temporary = false;
   bool discrete = false;
+  bool stored = true;
 
  public:
   list<const ForecastMeasureComputed*> dependents;
@@ -444,6 +449,28 @@ class ForecastMeasureComputed : public ForecastMeasureAggregated {
   static ForecastMeasureComputed::CustomerAttribute functionCustomerAttribute;
 };
 
+/* Identical to an computed measure, but the lowest level where data is
+ * stored are the planned forecasts.
+ *
+ * TODO there is no protection for setting a value below the planned level.
+ */
+class ForecastMeasureComputedPlanned : public ForecastMeasureComputed {
+ public:
+  explicit ForecastMeasureComputedPlanned() { initType(metadata); }
+
+  virtual const MetaClass& getType() const { return *metadata; }
+  static const MetaClass* metadata;
+  static int initialize();
+
+  ForecastMeasureComputedPlanned(const char* n, const string& expr,
+                                 double d = 0.0)
+      : ForecastMeasureComputed(n, expr, d) {
+    initType(metadata);
+  }
+
+  virtual bool isLeaf(const ForecastBase* f) const;
+};
+
 class ForecastMeasureTemp : public ForecastMeasure {
  public:
   explicit ForecastMeasureTemp() { initType(metadata); }
@@ -454,7 +481,7 @@ class ForecastMeasureTemp : public ForecastMeasure {
 
   ForecastMeasureTemp(ForecastMeasure& base)
       : ForecastMeasure(string("temp") + base.getName(), base.getDefault(),
-                        false, base.isAggregate(), true) {
+                        false, base.isAggregate(), true, false) {
     initType(metadata);
   }
 
@@ -480,7 +507,7 @@ class Measures {
   static const ForecastMeasureAggregated* orderstotal;
   static const ForecastMeasureAggregated* ordersadjustment;
   static const ForecastMeasureAggregated* ordersopen;
-  static const ForecastMeasureAggregatedPlanned* ordersplanned;
+  static const ForecastMeasureAggregated* ordersplanned;
   static const ForecastMeasureAggregatedPlanned* forecastplanned;
   static const ForecastMeasureLocal* outlier;
   static const ForecastMeasureLocal* nodata;
@@ -1195,6 +1222,9 @@ class ForecastBase {
   inline shared_ptr<ForecastData> getData() const;
 
   void markDirty() const { const_cast<ForecastBase*>(this)->data.markDirty(); }
+  void clearDirty() const {
+    const_cast<ForecastBase*>(this)->data.clearDirty();
+  }
 
   int getHorizonFuture() const {
     return horizon_future;  // This is a static variable!
@@ -1786,7 +1816,7 @@ class ForecastSolver : public Solver {
     bool force;
 
     Metrics(double a, double b, bool c)
-        : smape(a), standarddeviation(b), force(c){};
+        : smape(a), standarddeviation(b), force(c) {};
   };
 
   /* Abstract base class for all forecasting methods. */

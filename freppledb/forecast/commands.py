@@ -31,16 +31,17 @@ import sys
 from time import time, sleep
 from warnings import warn
 
+from django.core import management
 from django.db import connections, transaction, DEFAULT_DB_ALIAS
 from django.db.models import Case, When, Value, IntegerField, Q
 from django.utils.translation import gettext_lazy as _
 
-from .models import Forecast
+from .models import Forecast, ForecastPlan
 from freppledb.boot import getAttributes
 from freppledb.common.commands import PlanTaskRegistry, PlanTask, clean_value
 from freppledb.common.models import Parameter, BucketDetail
 from freppledb.common.report import getCurrentDate
-from freppledb.input.commands.load import LoadTask
+from freppledb.input.commands.load import LoadTask, CheckTask
 from freppledb.input.models import Item, Customer, Location
 
 
@@ -198,9 +199,12 @@ class PopulateForecastTable(PlanTask):
                 cursor.execute(
                     """
                     delete from forecast f
-                    using (select distinct item_id, location_id from forecast
-                    except select distinct item_id, location_id from demand
-                    except select distinct item_id, location_id from forecastplan where value ?| array['ordersadjustment','forecastoverride']) t
+                    using (
+                      select distinct item_id, location_id from forecast
+                      except select distinct item_id, location_id from demand
+                      except select distinct item_id, location_id from forecastplan
+                         where ordersadjustment is not null or forecastoverride is not null
+                      ) t
                     where t.item_id = f.item_id
                     and t.location_id = f.location_id
                     """
@@ -220,7 +224,11 @@ class PopulateForecastTable(PlanTask):
                                     where forecastplan.item_id = forecast.item_id
                                     and forecastplan.location_id =forecast.location_id
                                     and forecastplan.customer_id =forecast.customer_id
-                                    and forecastplan.value ?| array['ordersadjustment','forecastoverride'])
+                                    and (
+                                      forecastplan.ordersadjustment is not null
+                                      or forecastplan.forecastoverride is not null
+                                      )
+                                   )
                     """,
                     (parentCustomer,),
                 )
@@ -341,7 +349,13 @@ class CalculateDemandPattern(PlanTask):
         )
 
         # Merge results
-        cursor.execute("update item set adi = null, cv2 = null, demand_pattern = null")
+        cursor.execute(
+            """
+            update item
+            set adi = null, cv2 = null, demand_pattern = null
+            where adi is not null or cv2 is not null or demand_pattern is not null
+            """
+        )
         cursor.execute(
             """
             update item
@@ -381,191 +395,6 @@ class AggregateDemand(PlanTask):
 
     @classmethod
     def run(cls, database=DEFAULT_DB_ALIAS, **kwargs):
-        if (
-            Parameter.getValue(
-                "forecast.new_demand_aggregation", database, "false"
-            ).lower()
-            == "true"
-        ):
-            cls.run_new(database=database, **kwargs)
-        else:
-            cls.run_old(database=database, **kwargs)
-
-    @classmethod
-    def run_new(cls, database=DEFAULT_DB_ALIAS, **kwargs):
-        with connections[database].cursor() as cursor:
-            fcst_calendar = Parameter.getValue("forecast.calendar", database, None)
-            horizon_future = int(
-                Parameter.getValue("forecast.Horizon_future", database, 365)
-            )
-            horizon_history = int(
-                Parameter.getValue("forecast.Horizon_history", database, 10000)
-            )
-            currentdate = getCurrentDate(database)
-
-            # Delete forecastplan records for invalid dates
-            starttime = time()
-
-            # Creating temp tables
-            cursor.execute(
-                """
-                create temporary table item_hierarchy on commit preserve rows as
-                select parent.name parent, child.name child from item parent
-                inner join item child
-                on child.lft between parent.lft and parent.rght
-                """
-            )
-            cursor.execute(
-                """
-                create index item_hierarchy_idx on item_hierarchy (child)
-                """
-            )
-            cursor.execute(
-                """
-                create temporary table location_hierarchy on commit preserve rows as
-                select parent.name parent, child.name child from location parent
-                inner join location child
-                on child.lft between parent.lft and parent.rght
-                """
-            )
-            cursor.execute(
-                "create index location_hierarchy_idx on location_hierarchy (child)"
-            )
-            cursor.execute(
-                """
-                create temporary table customer_hierarchy on commit preserve rows as
-                select parent.name parent, child.name child from customer parent
-                inner join customer child
-                on child.lft between parent.lft and parent.rght
-                """
-            )
-            cursor.execute(
-                "create index customer_hierarchy_idx on customer_hierarchy (child)"
-            )
-            cursor.execute(
-                """
-                drop table if exists forecasthierarchy;
-                create table forecasthierarchy as
-                select distinct
-                item_hierarchy.parent item_id, location_hierarchy.parent location_id,
-                customer_hierarchy.parent customer_id
-                from forecast
-                inner join item_hierarchy on forecast.item_id = item_hierarchy.child
-                inner join customer_hierarchy on forecast.customer_id = customer_hierarchy.child
-                inner join location_hierarchy on forecast.location_id = location_hierarchy.child
-                where coalesce(method, 'automatic') != 'aggregate'
-                """
-            )
-            cursor.execute(
-                "create unique index nodes on forecasthierarchy (item_id, location_id, customer_id)"
-            )
-            cursor.execute(
-                "drop table item_hierarchy, location_hierarchy, customer_hierarchy"
-            )
-
-            cursor.execute(
-                """
-                delete from forecastplan
-                where (startdate, enddate) not in  (
-                select startdate, enddate
-                from common_bucketdetail
-                where bucket_id = %s
-                and startdate >= %s
-                and startdate < %s
-                and enddate > least((select coalesce(min(due),'2000-01-01 00:00:00'::timestamp) from demand),
-                                    %s)
-                )
-                """,
-                (
-                    fcst_calendar,
-                    currentdate - timedelta(days=horizon_history),
-                    currentdate + timedelta(days=horizon_future),
-                    currentdate,
-                ),
-            )
-            transaction.commit(using=database)
-            logger.info(
-                "Aggregate - deleted %d obsolete forecast buckets in %.2f seconds"
-                % (cursor.rowcount, time() - starttime)
-            )
-
-            # Main aggregation
-            starttime = time()
-            cursor.execute(
-                """
-                begin;
-                call aggregatedemand(%s, %s, %s);
-                end;
-                """,
-                (
-                    fcst_calendar,
-                    currentdate - timedelta(days=horizon_history),
-                    currentdate + timedelta(days=horizon_future),
-                ),
-            )
-            logger.info(
-                "Aggregate - aggregated demand information in %.2f seconds"
-                % (time() - starttime)
-            )
-
-            # Pruning empty records
-            starttime = time()
-            cursor.execute(
-                """
-                delete from forecastplan
-                where value = '{}'::jsonb or value is null
-                """
-            )
-            transaction.commit(using=database)
-            logger.info(
-                "Aggregate - pruned %d empty records in %.2f seconds"
-                % (cursor.rowcount, time() - starttime)
-            )
-
-            # Pruning dangling records, ie records that have no child any longer
-            # in the forecast table
-            starttime = time()
-            cursor.execute(
-                """
-                with cte as (
-                   select distinct item_id, location_id, customer_id
-                   from forecastplan
-                   )
-                delete from forecastplan
-                where (item_id, location_id, customer_id) in (
-                    select
-                      item_id, location_id, customer_id
-                    from cte
-                    where not exists (
-                      select 1
-                      from forecast
-                      inner join item
-                        on forecast.item_id = item.name
-                      inner join location
-                        on forecast.location_id = location.name
-                      inner join customer
-                        on forecast.customer_id = customer.name
-                      inner join item as fitem on
-                        cte.item_id = fitem.name
-                      inner join location as flocation
-                        on cte.location_id = flocation.name
-                      inner join customer as fcustomer
-                        on cte.customer_id = fcustomer.name
-                      where item.lft between fitem.lft and fitem.rght
-                        and location.lft between flocation.lft and flocation.rght
-                        and customer.lft between fcustomer.lft and fcustomer.rght
-                    )
-                )
-                """
-            )
-            transaction.commit(using=database)
-            logger.info(
-                "Aggregate - pruned %d dangling records in %.2f seconds"
-                % (cursor.rowcount, time() - starttime)
-            )
-
-    @classmethod
-    def run_old(cls, database=DEFAULT_DB_ALIAS, **kwargs):
         cursor = connections[database].cursor()
 
         fcst_calendar = Parameter.getValue("forecast.calendar", database, None)
@@ -658,7 +487,6 @@ class AggregateDemand(PlanTask):
                 currentdate,
             ),
         )
-        transaction.commit(using=database)
         logger.info(
             "Aggregate - deleted %d obsolete forecast buckets in %.2f seconds"
             % (cursor.rowcount, time() - starttime)
@@ -676,14 +504,26 @@ class AggregateDemand(PlanTask):
             and forecastplan.customer_id = t.customer_id
             """
         )
-        transaction.commit(using=database)
         logger.info(
             "Aggregate - deleted %d invalid combinations in %.2f seconds"
             % (cursor.rowcount, time() - starttime)
         )
 
-        # reset leaf nodes with no more open/total orders
         starttime = time()
+
+        # skipping demand records where the sum(quantity) is negative
+        # for an item/location/customer/bucket
+        cursor.execute(
+            """
+        create temporary table excludedcombinations as
+        select item_id, location_id, customer_id, cb.startdate, cb.enddate
+        from demand
+        inner join common_bucketdetail cb on due >= cb.startdate and due < cb.enddate
+        where coalesce(demand.status, 'open') != 'canceled'
+        group by item_id, location_id, customer_id, cb.startdate, cb.enddate
+        having sum(quantity) < 0
+        """
+        )
 
         cursor.execute(
             """
@@ -691,10 +531,10 @@ class AggregateDemand(PlanTask):
             select startdate, enddate,
             item_hierarchy.parent item_id, location_hierarchy.parent location_id,
             customer_hierarchy.parent customer_id,
-            greatest(sum(case when coalesce(status, 'open') in ('open','quote') then quantity else 0 end), 0) ordersopen,
-            greatest(sum(quantity),0) orderstotal,
-            greatest(sum(case when coalesce(status, 'open') in ('open','quote') then quantity*item.cost else 0 end), 0) ordersopenvalue,
-            greatest(sum(quantity*item.cost), 0)  orderstotalvalue
+            nullif(greatest(sum(case when coalesce(status, 'open') in ('open','quote') then quantity else 0 end), 0),0) ordersopen,
+            nullif(greatest(sum(quantity),0),0) orderstotal,
+            nullif(greatest(sum(case when coalesce(status, 'open') in ('open','quote') then quantity*item.cost else 0 end), 0),0) ordersopenvalue,
+            nullif(greatest(sum(quantity*item.cost), 0),0)  orderstotalvalue
             from demand
             inner join item on item.name = demand.item_id
             inner join item_hierarchy on demand.item_id = item_hierarchy.child
@@ -709,11 +549,13 @@ class AggregateDemand(PlanTask):
                   and cb.startdate <= due
                   and due < cb.enddate
             where %s <= cb.startdate and cb.startdate < %s and coalesce(demand.status, 'open') != 'canceled'
+            and not exists (select 1 from excludedcombinations where demand.item_id = item_id and demand.location_id = location_id
+            and demand.customer_id = customer_id and demand.due >= startdate and demand.due < enddate)
             group by startdate, enddate, item_hierarchy.parent, location_hierarchy.parent,
             customer_hierarchy.parent
             having greatest(sum(quantity),0) != 0 or greatest(sum(case when coalesce(status, 'open') in ('open','quote') then quantity else 0 end), 0) != 0;
             create unique index on demand_agg (item_id, location_id, customer_id, startdate);
-        """,
+            """,
             (
                 fcst_calendar,
                 currentdate - timedelta(days=horizon_history),
@@ -721,71 +563,47 @@ class AggregateDemand(PlanTask):
             ),
         )
 
-        #
-        cursor.execute(
-            """
-            create temporary table leaf_nomore_orders on commit preserve rows as
-            (select forecastplan.item_id, forecastplan.location_id, forecastplan.customer_id,
-            forecastplan.startdate, 'ordersopen' measure from forecastplan
-            inner join forecast on forecast.item_id = forecastplan.item_id
-                                and forecast.location_id = forecastplan.location_id
-                                and forecast.customer_id = forecastplan.customer_id
-            where forecastplan.value ? 'ordersopen'
-            and coalesce(forecast.method, 'automatic') != 'aggregate'
-            except
-            select item_id, location_id, customer_id, startdate, 'ordersopen' from demand_agg
-            where ordersopen > 0)
-            union all
-            (select forecastplan.item_id, forecastplan.location_id, forecastplan.customer_id,
-            forecastplan.startdate, 'orderstotal' measure from forecastplan
-            inner join forecast on forecast.item_id = forecastplan.item_id
-                                and forecast.location_id = forecastplan.location_id
-                                and forecast.customer_id = forecastplan.customer_id
-            where forecastplan.value ? 'orderstotal'
-            and coalesce(forecast.method, 'automatic') != 'aggregate'
-            except
-            select item_id, location_id, customer_id, startdate, 'orderstotal' from demand_agg
-            where orderstotal > 0);
-
-            create index on leaf_nomore_orders (item_id, location_id, customer_id, startdate);
-            """
-        )
-
-        cursor.execute(
-            """
-           update forecastplan set value = (value - leaf_nomore_orders.measure) - (leaf_nomore_orders.measure||'value')
-           from leaf_nomore_orders
-           where forecastplan.item_id = leaf_nomore_orders.item_id
-           and forecastplan.location_id = leaf_nomore_orders.location_id
-           and forecastplan.customer_id = leaf_nomore_orders.customer_id
-           and forecastplan.startdate = leaf_nomore_orders.startdate
-           """
-        )
-
-        logger.info(
-            "Aggregate - reset %d leaf node records with no more open/total in %.2f seconds"
-            % (cursor.rowcount, time() - starttime)
-        )
-
         # updating open/total orders values
-        starttime = time()
         cursor.execute(
             """
-            insert into forecastplan (item_id, location_id, customer_id, startdate, enddate, value)
-            select item_id, location_id, customer_id, startdate, enddate, jsonb_strip_nulls(
-                                          jsonb_build_object('orderstotal', demand_agg.orderstotal,
-                                          'orderstotalvalue', demand_agg.orderstotalvalue,
-                                          'ordersopen', case when demand_agg.ordersopen = 0 then null else ordersopen end,
-                                          'ordersopenvalue', case when demand_agg.ordersopenvalue = 0 then null else ordersopenvalue end)
-                                          ) as value
+            insert into forecastplan
+              (item_id, location_id, customer_id, startdate, enddate,
+              orderstotal, orderstotalvalue, ordersopen, ordersopenvalue)
+            select
+              item_id, location_id, customer_id, startdate, enddate,
+              demand_agg.orderstotal as orderstotal,
+              demand_agg.orderstotalvalue as orderstotalvalue,
+              demand_agg.ordersopen as ordersopen,
+              demand_agg.ordersopenvalue as ordersopenvalue
             from demand_agg
             on conflict (item_id, location_id, customer_id, startdate)
-            do update set value =  forecastplan.value || excluded.value
+            do update set
+               orderstotal = excluded.orderstotal,
+               orderstotalvalue = excluded.orderstotalvalue,
+               ordersopen = excluded.ordersopen,
+               ordersopenvalue = excluded.ordersopenvalue
             where
-              (excluded.value->>'orderstotal')::numeric is distinct from (forecastplan.value->>'orderstotal')::numeric
-              or (excluded.value->>'ordersopen')::numeric is distinct from (forecastplan.value->>'ordersopen')::numeric
-              or (excluded.value->>'orderstotalvalue')::numeric is distinct from (forecastplan.value->>'orderstotalvalue')::numeric
-              or (excluded.value->>'ordersopenvalue')::numeric is distinct from (forecastplan.value->>'ordersopenvalue')::numeric
+              excluded.orderstotal is distinct from forecastplan.orderstotal
+              or excluded.orderstotalvalue is distinct from forecastplan.orderstotalvalue
+              or excluded.ordersopen is distinct from forecastplan.ordersopen
+              or excluded.ordersopenvalue is distinct from forecastplan.ordersopenvalue;
+            """
+        )
+        cursor.execute(
+            """
+            -- Handle when there is no match in demand_agg
+            UPDATE forecastplan
+            SET ordersopen = NULL, ordersopenvalue = NULL, orderstotal = NULL, orderstotalvalue = NULL
+            where not exists (select 1 from demand_agg
+            WHERE forecastplan.item_id = demand_agg.item_id
+            AND forecastplan.location_id = demand_agg.location_id
+            AND forecastplan.customer_id = demand_agg.customer_id
+            AND forecastplan.startdate = demand_agg.startdate)
+            and exists
+            (select 1 from forecast where forecastplan.item_id = item_id and forecastplan.location_id = location_id
+            and forecastplan.customer_id = customer_id
+            and coalesce(method, 'automatic') != 'aggregate')
+            and (ordersopen is not NULL or ordersopenvalue is not null or orderstotal is not NULL or orderstotalvalue is not NULL);
             """
         )
         logger.info(
@@ -793,12 +611,15 @@ class AggregateDemand(PlanTask):
             % (time() - starttime)
         )
 
-        # updating open/total orders values
+        # Pruning empty records
         starttime = time()
         cursor.execute(
             """
             delete from forecastplan
-            where (value = '{}' or value is null)
+            where jsonb_strip_nulls(
+              to_jsonb(forecastplan)
+              - array['customer_id', 'item_id', 'location_id', 'startdate', 'enddate']
+              ) = '{}'::jsonb
             """
         )
         transaction.commit(using=database)
@@ -812,9 +633,45 @@ class AggregateDemand(PlanTask):
         cursor.execute("drop table item_hierarchy")
         cursor.execute("drop table location_hierarchy")
         cursor.execute("drop table customer_hierarchy")
+        cursor.execute("drop table excludedcombinations")
         cursor.execute("drop table demand_agg")
-        cursor.execute("drop table leaf_nomore_orders")
         logger.info("Aggregate - wrapping up in %.2f seconds" % (time() - starttime))
+
+
+@PlanTaskRegistry.register
+class checkMeasures(CheckTask):
+    # check that all mandatory measures are in the database
+    description = "Checking Measures"
+    sequence = 75
+
+    @classmethod
+    def run(cls, database=DEFAULT_DB_ALIAS, **kwargs):
+        with connections[database].cursor() as cursor:
+
+            # Make sure mandatory measures are inserted in the the database
+            cursor.execute("select name from measure")
+            measures = [i[0] for i in cursor] if cursor else []
+            mandatory = [
+                "forecastbaselinevalue",
+                "forecastconsumedvalue",
+                "forecastnetvalue",
+                "forecastoverridevalue",
+                "forecastplannedvalue",
+                "forecasttotal",
+                "forecasttotalvalue",
+                "nodata",
+                "ordersadjustmentvalue",
+                "ordersopenvalue",
+                "ordersplannedvalue",
+                "orderstotalvalue",
+            ]
+
+            if not all(m in measures for m in mandatory):
+                management.call_command(
+                    "loaddata", "measures.json", database=database, verbosity=0
+                )
+                ForecastPlan.refreshTableColumns(database)
+                logger.info("Some missing mandatory measures have been added.")
 
 
 @PlanTaskRegistry.register
@@ -835,21 +692,6 @@ class LoadMeasures(PlanTask):
         with connections[database].cursor() as cursor:
             cursor.execute(
                 """
-                insert into measure
-                  (name, label, type, mode_future, mode_past, description,
-                   compute_expression, formatter, initially_hidden, defaultvalue,
-                   lastmodified)
-                values (
-                  'forecasttotal', 'total forecast', 'computed', 'view', 'view',
-                  'This row is what we''ll plan supply for',
-                  'if(forecastoverride == -1, forecastbaseline, forecastoverride)',
-                  'number', false, 0, now()
-                  )
-                on conflict (name) do nothing
-                """
-            )
-            cursor.execute(
-                """
                 select
                   type, name, discrete, compute_expression, update_expression, defaultvalue, overrides
                 from measure
@@ -860,7 +702,19 @@ class LoadMeasures(PlanTask):
                 cnt += 1
                 try:
                     m = None
-                    if i[0] == "computed":
+                    if i[1] in [
+                        "forecastconsumedvalue",
+                        "forecastnetvalue",
+                        "forecastplannedvalue",
+                    ]:
+                        m = frepple.measure_computedplanned(
+                            name=i[1],
+                            discrete=i[2],
+                            compute_expression=i[3],
+                            update_expression=i[4],
+                            default=i[5],
+                        )
+                    elif i[0] == "computed":
                         m = frepple.measure_computed(
                             name=i[1],
                             discrete=i[2],
@@ -912,7 +766,9 @@ class LoadForecast(LoadTask):
         else:
             filter_where = ""
 
-        attrs = [f[0] for f in getAttributes(Forecast)]
+        attrs = [
+            f[0] for f in getAttributes(Forecast) if not f[2].startswith("foreignkey:")
+        ]
         if attrs:
             attrsql = ", %s" % ", ".join(attrs)
         else:
@@ -1008,7 +864,9 @@ class ExportStaticForecast(PlanTask):
         import frepple
 
         source = kwargs.get("source", None)
-        attrs = [f[0] for f in getAttributes(Forecast)]
+        attrs = [
+            f[0] for f in getAttributes(Forecast) if not f[2].startswith("foreignkey:")
+        ]
 
         def getData():
             for i in frepple.demands():
@@ -1111,12 +969,11 @@ def createForecastSolver(db, task=None):
     else:
         forecast_currentdate = frepple.settings.current
         with connections[db].cursor() as cursor:
-            cursor.execute(
-                """
-            select max(due) from demand;
-            """
-            )
-            max_due = cursor.fetchone()[0]
+            cursor.execute("select max(due) from demand")
+            try:
+                max_due = cursor.fetchone()[0]
+            except Exception:
+                max_due = None
 
             if max_due:
                 # The forecast solver current date is the end date of the
@@ -1124,14 +981,19 @@ def createForecastSolver(db, task=None):
                 forecastCalendar = Parameter.getValue("forecast.calendar", db, "month")
                 cursor.execute(
                     """
-                select enddate from common_bucketdetail where bucket_id = %s
-                and startdate <= %s and %s < enddate;
-                """,
+                    select max(enddate) from common_bucketdetail
+                    where bucket_id = %s
+                      and startdate <= %s
+                      and %s < enddate;
+                    """,
                     (forecastCalendar, max_due, max_due),
                 )
-                enddate = cursor.fetchone()[0]
-                if enddate < forecast_currentdate:
-                    forecast_currentdate = enddate
+                try:
+                    enddate = cursor.fetchone()[0]
+                    if enddate < forecast_currentdate:
+                        forecast_currentdate = enddate
+                except Exception:
+                    pass
     frepple.settings.fcst_current = forecast_currentdate
 
     try:
@@ -1153,7 +1015,7 @@ def createForecastSolver(db, task=None):
             .filter(name__startswith="forecast.")
             .exclude(name="forecast.populateForecastTable")
             .exclude(name="forecast.runnetting")
-            .order_by("custom_order")
+            .order_by("custom_order", "name")
         ):
             parameter_value = None
             if calendar and param.value.strip().lower() == "default":
@@ -1283,7 +1145,9 @@ def createForecastSolver(db, task=None):
                     "Bucket dates table doesn't cover the complete forecasting horizon"
                 )
         else:
-            logger.warning("Parameter forecast.calendar or forecast.horizon_future not configured.")
+            logger.warning(
+                "Parameter forecast.calendar or forecast.horizon_future not configured."
+            )
             return None
 
         return frepple.solver_forecast(**kw)

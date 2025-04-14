@@ -71,7 +71,6 @@ from django.core.management import get_commands, call_command
 
 from freppledb import __version__
 from freppledb.admin import data_site
-from freppledb.common.auth import basicauthentication
 from freppledb.common.dataload import parseExcelWorksheet
 from freppledb.common.models import Scenario, HierarchyModel, Parameter
 from freppledb.common.report import (
@@ -134,6 +133,13 @@ class TaskReport(GridReport):
         GridFieldLocalDateTime(
             "finished", title=_("finished"), editable=False, align="center"
         ),
+        GridFieldDuration(
+            "duration",
+            title=_("duration"),
+            search=False,
+            editable=False,
+            align="center",
+        ),
         GridFieldText(
             "status",
             title=_("status"),
@@ -166,42 +172,77 @@ class TaskReport(GridReport):
             editable=False,
             align="center",
         ),
-        GridFieldDuration(
-            "duration",
-            title=_("duration"),
-            search=False,
-            editable=False,
-            align="center",
-        ),
         GridFieldBool("cancelable", title="cancelable", hidden=True),
     )
 
     @classmethod
     def extra_context(reportclass, request, *args, **kwargs):
-        # Loop over all accordion of all apps and directories
-        accordions = set()
-        accord = ""
+        # Get the list of all available commands
+        all_commands = []
+        cnt = 0
         for commandname, appname in get_commands().items():
             try:
-                accord = getattr(
+                cmd = getattr(
                     import_module("%s.management.commands.%s" % (appname, commandname)),
                     "Command",
                 )
-                if getattr(accord, "index", -1) >= 0 and getattr(
-                    accord, "getHTML", None
-                ):
-                    accord.name = commandname
-                    accordions.add(accord)
+                if getattr(cmd, "index", -1) >= 0 and getattr(cmd, "getHTML", None):
+                    cmd.name = commandname
+                    html = cmd.getHTML(request)
+                    if html:
+                        all_commands.append(
+                            {
+                                "command": cmd,
+                                "options": {"collapsed": cmd.name != "runplan"},
+                                "html": html,
+                            }
+                        )
+                    cnt += 1
             except Exception as e:
                 logger.warning(
                     "Couldn't import getHTML method from %s.management.commands.%s: %s"
                     % (appname, commandname, e)
                 )
 
-        accordions = sorted(accordions, key=operator.attrgetter("index"))
+        # Use the preferences
+        commandlist1 = []
+        commandlist2 = []
+        prefs = getattr(request, "prefs", None)
+        if prefs:
+            # Add preferences to the command lists
+            widgets = prefs.get("widgets", [])
+            for row in widgets:
+                column = row.get("name", "")
+                if column == "column1":
+                    column = commandlist1
+                elif column == "column2":
+                    column = commandlist2
+                else:
+                    continue
+                for c in row.get("cols", []):
+                    for w in c.get("widgets", []):
+                        cnt1 = 0
+                        for cmd in all_commands:
+                            if cmd["command"].name == w[0]:
+                                cmd["options"] = w[1]
+                                cnt += 1
+                                column.append(cmd)
+                                del all_commands[cnt1]
+                                break
+                            cnt1 += 1
+            # Add any commands not yet in the preferences
+            if widgets:
+                for w in all_commands:
+                    commandlist1.append(w)
+        if not commandlist1 and not commandlist2:
+            # No preferences, divide the commands equal over 2 columns
+            all_commands.sort(key=lambda x: x["command"].index)
+            mid = (len(all_commands) + 1) // 2
+            commandlist1 = all_commands[:mid]
+            commandlist2 = all_commands[mid:]
 
         # Send to template
-        return {"commandlist": accordions}
+        return {"commandlist1": commandlist1, "commandlist2": commandlist2}
 
     @classmethod
     def query(reportclass, request, basequery, sortsql="1 asc"):
@@ -259,7 +300,6 @@ class TaskReport(GridReport):
 
 
 @csrf_exempt
-@basicauthentication(allow_logged_in=True)
 def APITask(request, action):
     try:
         if action == "status":
@@ -381,7 +421,7 @@ def LaunchTask(request, action):
                 streaming_content=importWorkbook(request),
             )
         elif action in ("frepple_stop_web_service", "stopwebservice"):
-            if not request.user.has_perm("auth.generate_plan"):
+            if not request.user.has_perm("auth.auth.generate_plan"):
                 raise Exception("Missing execution privileges")
             from django.core import management
 
@@ -414,7 +454,7 @@ def wrapTask(request, action):
     # A
     # TODO remove special case - call runwebservice or runplan instead
     if action in ("runplan", "runwebservice"):
-        if not request.user.has_perm("auth.generate_plan"):
+        if not request.user.has_perm("auth.auth.generate_plan"):
             raise Exception("Missing execution privileges")
         constraint = parseConstraints(",".join(args.getlist("constraint")))
         task = Task(name="runplan", submitted=now, status="Waiting", user=request.user)
@@ -772,8 +812,10 @@ def DeleteLogFile(request, taskid):
         )
     filename = Task.objects.using(request.database).get(id=taskid).logfile
     if (
-        filename.lower().endswith(".dump") and not request.user.is_superuser
-    ) or not filename.lower().endswith((".log", ".dump")):
+        not filename
+        or (filename.lower().endswith(".dump") and not request.user.is_superuser)
+        or not filename.lower().endswith((".log", ".dump"))
+    ):
         return HttpResponseNotFound(force_str(_("Error")))
     try:
         os.remove(os.path.join(settings.FREPPLE_LOGDIR, filename))
@@ -894,7 +936,6 @@ class FileManager:
 
     @staticmethod
     @csrf_exempt
-    @basicauthentication(allow_logged_in=True)
     @staff_member_required
     @never_cache
     def uploadFiletoFolder(request, foldercode):
@@ -918,7 +959,7 @@ class FileManager:
                         }
 
             return JsonResponse(filelist)
-        elif request.method == "POST":
+        elif request.method in ("POST", "PUT"):
             # Upload a new data file
             if len(list(request.FILES.items())) == 0:
                 return HttpResponseNotFound("Missing file selection in request")
@@ -993,12 +1034,12 @@ class FileManager:
             return response
         else:
             return HttpResponseNotAllowed(
-                ["post", "get"], content="Only GET and POST request methods are allowed"
+                ["post", "put", "get"],
+                content="Only GET, PUT and POST request methods are allowed",
             )
 
     @staticmethod
     @csrf_exempt
-    @basicauthentication(allow_logged_in=True)
     @staff_member_required
     @never_cache
     def deleteFilefromFolder(request, foldercode, files):
@@ -1046,7 +1087,6 @@ class FileManager:
 
     @staticmethod
     @csrf_exempt
-    @basicauthentication(allow_logged_in=True)
     @staff_member_required
     @never_cache
     def downloadFilefromFolder(request, foldercode, filename=None):
@@ -1137,6 +1177,7 @@ def scheduletasks(request):
             fld = data.get("email_success", None)
             if fld:
                 obj.email_success = fld
+            obj.tz = data.get("timezone", settings.TIME_ZONE)
             fld = data.get("data", None)
             if isinstance(fld, dict):
                 obj.data = fld
@@ -1146,7 +1187,6 @@ def scheduletasks(request):
                 ScheduledTask.objects.using(request.database).filter(
                     name=oldname
                 ).delete()
-            obj.adjustForTimezone(-GridReport.getTimezoneOffset(request))
             obj.save(using=request.database)
             scheduler.waitNextEvent(database=request.database)
             obj.adjustForTimezone(GridReport.getTimezoneOffset(request))
@@ -1158,14 +1198,16 @@ def scheduletasks(request):
         elif request.method == "DELETE":
             if not request.user.has_perm("execute.delete_scheduledtask"):
                 return HttpResponse("Couldn't delete scheduled task", status=401)
-            elif (
-                ScheduledTask.objects.using(request.database)
-                .filter(name=name)
-                .delete()[0]
-            ):
-                return HttpResponse(content="OK")
             else:
-                return HttpResponse("Couldn't delete scheduled task", status=400)
+                try:
+                    obj = (
+                        ScheduledTask.objects.using(request.database)
+                        .get(name=oldname if oldname else name)
+                        .delete()
+                    )
+                    return HttpResponse(content="OK")
+                except ScheduledTask.DoesNotExist:
+                    return HttpResponse("Couldn't delete scheduled task", status=400)
     except Exception as e:
         logger.error("Error updating scheduled task: %s" % e)
         return HttpResponseServerError("Error updating scheduled task")

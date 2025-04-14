@@ -40,7 +40,7 @@ a task</a> to simplify running the sequence and avoid mistakes.</p>
   </div>
   <div class="col-3 d-flex">
     {% if schedule.next_run %}
-    <div class="d-flex align-items-center" data-field="next-run">{{ schedule.next_run|date:"DATETIME_FORMAT" }}</div>
+    <div class="d-flex align-items-center" data-field="next-run">{{ schedule.next_run|date:"DATE_FORMAT" }} {{ schedule.next_run|date:"H:i:s" }}</div>
     {% elif not schedule.name %}
     <div class="d-flex align-items-center" data-field="next-run"></div>
     {% endif %}
@@ -66,7 +66,7 @@ a task</a> to simplify running the sequence and avoid mistakes.</p>
     </div>
   </div>
   {% endif %}
-  {% if perms.execute.change_scheduledtask and not widget %}
+  {% if perms.execute.add_scheduledtask and not widget %}
   <div class="col-1 text-center">
     <button class="btn btn-sm btn-primary" onclick="editScheduledTask(this, event)"
       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="{% trans "Edit" %}">
@@ -75,16 +75,16 @@ a task</a> to simplify running the sequence and avoid mistakes.</p>
   </div>
   {% endif %}
 </div>
-{% if perms.execute.change_scheduledtask %}
+{% if perms.execute.add_scheduledtask %}
 <div class="row p-3 d-none{% if not schedule.name %}" id="scheduledtask_template{% endif%}" data-schedule-name="{{ schedule.name }}"
   style="border-style:solid; border-radius:10px; border-width:1px; margin:10px 0 10px 0">
   <div class="col-2 text-center">
     <div>
-      <button class="btn btn-primary w-100" style="margin-bottom:20px; margin-top: 15px" onclick="saveScheduledTask(this, event)">
+      <button class="btn btn-primary w-100 text-nowrap" style="margin-bottom:20px; margin-top: 15px" onclick="saveScheduledTask(this, event)">
       {% trans "Save" %}</button>
     </div>
     <div>
-      <button class="btn btn-primary w-100" onclick="deleteScheduledTask(this, event)">
+      <button class="btn btn-primary w-100 text-nowrap" onclick="deleteScheduledTask(this, event)">
       {% trans "Delete" %}
       </button>
     </div>
@@ -148,9 +148,19 @@ a task</a> to simplify running the sequence and avoid mistakes.</p>
  		<div class="row mb-3">
       <label for="schedule-{{forloop.counter}}-start" class="col-3 col-form-label">{% trans "start time"|capfirst %}</label>
       <div class="col-9">
-        <input type="text" class="form-control" id="schedule-{{forloop.counter}}-at"
-          data-field="starttime" placeholder="HH:MM:SS"
-          {% if schedule.data.starttime < 86400 and schedule.data.starttime > 0 %}value="{{schedule.data.starttime|timeformat}}"{% endif %}>
+        <div class="input-group">
+          <input type="text" class="form-control" id="schedule-{{forloop.counter}}-at"
+            data-field="starttime" placeholder="HH:MM:SS"
+            {% if schedule.data.starttime < 86400 and schedule.data.starttime > 0 %}value="{{schedule.data.starttime|timeformat}}"{% endif %}>
+          <button class="btn btn-outline-primary dropdown-toggle" data-field="task-timezone"
+             type="button" data-bs-toggle="dropdown" aria-expanded="false">{% firstof schedule.tz default_timezone %}</button>
+          <ul class="dropdown-menu dropdown-menu-end" style="max-height: 30em; overflow-y: auto">
+            {% for tz in timezones %}
+              <li><a class="timezone dropdown-item{% if default_timezone == tz.1 %} active{% endif %}" data-value="{{tz.1}}"
+                  onclick="$(event.target).closest('ul').prev().text('{{tz.1}}')">{{tz.0}}&nbsp;&nbsp;{{tz.1}}</a></li>
+            {% endfor %}
+          </ul>
+        </div>
       </div>
     </div>
     <div class="row mb-3">
@@ -328,6 +338,7 @@ function saveScheduledTask(el, event) {
       "oldname": oldschedname,
       "email_failure": form.find("[data-field='email_failure']").val(),
       "email_success": form.find("[data-field='email_success']").val(),
+      "timezone": form.find("[data-field='task-timezone']").text(),
       "data": {
         "starttime": starttime.hours() * 3600 + starttime.minutes() * 60 + starttime.seconds(),
         "monday": form.find("[data-field='monday']").is(":checked"),

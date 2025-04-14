@@ -706,7 +706,7 @@ class Resource_admin(MultiDBModelAdmin):
 @admin.register(OperationMaterial, site=data_site)
 class OperationMaterial_admin(MultiDBModelAdmin):
     model = OperationMaterial
-    raw_id_fields = ("operation", "item")
+    raw_id_fields = ("operation", "item", "location")
     save_on_top = True
     exclude = ("id",)
     fieldsets = (
@@ -715,6 +715,7 @@ class OperationMaterial_admin(MultiDBModelAdmin):
             _("advanced"),
             {
                 "fields": [
+                    "location",
                     "quantity_fixed",
                     "transferbatch",
                     "offset",
@@ -804,6 +805,7 @@ class ManufacturingOrder_admin(MultiDBModelAdmin):
                     "owner",
                     "status",
                     "batch",
+                    "remark",
                     "demand",
                 ]
                 + [a[0] for a in getAttributes(ManufacturingOrder) if a[3]]
@@ -858,6 +860,7 @@ class DistributionOrder_admin(MultiDBModelAdmin):
                     "receipt_date",
                     "status",
                     "batch",
+                    "remark",
                 ]
                 + [a[0] for a in getAttributes(DistributionOrder) if a[3]]
             },
@@ -913,6 +916,7 @@ class PurchaseOrder_admin(MultiDBModelAdmin):
                     "receipt_date",
                     "status",
                     "batch",
+                    "remark",
                 ]
                 + [a[0] for a in getAttributes(PurchaseOrder) if a[3]]
             },
@@ -966,6 +970,7 @@ class DeliveryOrder_admin(MultiDBModelAdmin):
                     "quantity",
                     "status",
                     "batch",
+                    "remark",
                 )
             },
         ),

@@ -1,8 +1,149 @@
 Release notes
 -------------
 
-9.5.0 (Upcoming release)
+9.8.0 (Upcoming release)
 ========================
+
+This release is scheduled for end of April.
+You can already check out a `preview <https://demo-preview.frepple.com>`_.
+
+.. rubric:: User interface
+
+- | Bug Fix: A forecast report file with the forecast column and without the item, location
+    and customer columns was loaded against the root forecast combination.
+
+.. rubric:: Production planning
+
+- | Bug fix: Situations where the sales order devlivery exceeds the requested quantity were not handled correctly.
+  | This can happen for instance when we need to round up the delivery to certain multiple.
+
+- | Bug fix: More robust handling of situation where the size minimum of an operation
+    is greater than the size maximum.
+  | In such a case, we'll respect the maximum size.
+
+.. rubric:: System administration
+
+- | The automatically keep the disk space for log files within acceptable boundaries, frepple
+    automatically deletes old log files when they exceed the size specificied with the
+    setting MAXTOTALLOGFILESIZE.
+  | In previous releases, this limit only applied to ".log" files. From this release onwards
+    we also include ".dump" files in this size.
+
+- | Bug fix: The task scheduler has a critical bug when the time zone of a task is different
+    from the time zone of the server. In some situations this can result have a continuous
+    execution of the task.
+
+.. rubric:: Odoo integration
+
+- | All Odoo versions. When exporting POs, MOs or DOs from the sales order table of frePPLe to Odoo,
+  | the supplier, end date and quantity can be updated in the export dialog before sending the records
+  | to Odoo.
+
+9.7.0 (2025-03-21)
+==================
+
+.. rubric:: User interface
+
+- | In version 8.3 of frePPLe, we introduced the possibility to filter MOs/POs/DOs using
+    the clock icon. Only MOs/POs/DOs in the time horizon were displayed.
+  | This led to some confusion so we are removing this feature.
+
+- | Fix of the bottom pane allowing the edition of a PO/MO/DO (to update its quantity, its dates or its status).
+  | This panel (which is visible when only one record is selected) was broken for a while.
+
+- | The inventory widgets in the purchase order, manufacturing order,
+    or distribution order screens have been improved.
+
+- | Fix on promoting a scenario to production. The promotion could fail in some cases.
+
+.. rubric:: System administration
+
+- | Addition of parameter archive.duration to delete the old archived data.
+  | So far, the archived data wasn't deleted. With this release, by default
+    archived data older than 1 year are deleted.
+
+- | Addition of parameter imports_skips_audit_log to control if the
+    `import data files <command-reference.html#importfromfolder>`_ command should log messages
+    about the data changes. By default, no message is logged.
+
+- | The task scheduler now allows specifying the time zone for the automatically
+    scheduled tasks.
+  | In previous releases, we faced issues on the dates where Daylight Saving Time
+    switches. Tasks were then run an hour too late or too early.
+  | Now the scheduled task will correctly respect the times in your time zone.
+  | Cursed be `George Hudson <https://en.wikipedia.org/wiki/George_Hudson_(entomologist)>`_.
+
+.. rubric:: Odoo integration
+
+- | 17, 18: Bug fix. The stock reservations by sales orders were not correctly
+    considered. Frepple incorrectly planned for the full quantity rather than only the
+    quantity that isn't reserved yet.
+
+- | Exports to odoo are now possible from the resource detail and inventory detail screens
+    is now possible.
+
+.. rubric:: Production planning
+
+- | Bug fix: Edits of custom attributes of type boolean on manufacturing orders, purchase orders
+    and distribution orders weren't saved correctly.
+
+9.6.0 (2025-02-07)
+==================
+
+.. rubric:: User interface
+
+- | Row selection logic updated. If the user clicks on the checkbox of a row,
+    that row is selected on top of the existing selection.
+  | The hotkey CRTL+A selects all the rows of the current page.
+
+- | The detail widgets with the details of a purchase order, manufacturing order,
+    or distribution order can now be rearranged.
+  | Different people just want to see different information first.
+
+- | The tasks in the execution screen can now be rearranged.
+  | It's convenient to put commmonly used tasks at the top.
+
+- | Bug fix: Users could not be set active or inactive in a scenario.
+
+.. rubric:: Demand forecasting
+
+- | The database structure for storing forecast data has been refactored.
+  | The new structure uses considerable less database storage and is a bit faster.
+
+  | !!! IMPORTANT !!!
+  | If you use the field forecastplan.value in your custom reqorts,
+    you will need to rewrite your queries to the new structure.
+
+.. rubric:: Production planning
+
+- | Operations can now consume and produce material in different
+    locations.
+  | Until now, an operation always consumed and produced material
+    in the same location. This new feature makes modeling complex
+    multi-location production environments easier.
+
+- | Purchase orders, manufacturing orders and distribution orders
+    get an extra field "remark", which allows users to leaves free text
+    comments on them.
+  | In earlier releases some implementations already used a custom attribute
+    field for this purpose.
+
+- | Bug fix: Sales orders in the status "inquiry" incorrectly were being planned
+    when a) the owner field is set and b) the delivery policy is set to alltogether.
+
+.. rubric:: Odoo integration
+
+- | 17, 18: Extra robostness to avoid creating manufacturing orders on
+    phantom kit bill of materials.
+
+- | 17, 18: Support for routes that produce or consume items
+    from different warehouses.
+
+- | 17, 18: The customer names are replaced with their Odoo IDs in frePPLe.
+    The name of the customer can be found in the description field.
+
+9.5.0 (2024-12-27)
+==================
 
 This release is scheduled for end of December.
 You can already check out a `preview <https://demo-preview.frepple.com>`_.
@@ -12,15 +153,23 @@ You can already check out a `preview <https://demo-preview.frepple.com>`_.
 - | The inventory report got a segment dropdown to allow easier filtering.
   | This applies to Enterprise and Cloud Editions only.
 
-- | A corner case has been resolved in the ABC classification.
-  | Items with a cost equal to 0 were not getting a classification. They will now
-    be classified in the last group (C if the ABC parameters were not updated).
-  | This applies to Enterprise and Cloud Editions only.
+- | Row selection logic updated. Clicking on a row unselects any existing selection
+    unless the shift key (to select a range of rows) or the ctrl key (to add a row
+    to the existing selection) is pressed.
+
+- | Performance optimization for configurations with a high number of scenarios.
+  | When many scenarios are active we noticed the user interface performance
+    is impacted, and frepple also needed an increasing number of database connections.
+  | These bottlenecks have now been resolved, and extra scenarios no longer
+    impact scalability and performance.
 
 .. rubric:: Production planning
 
 - | The planning algorithm has been refined to avoid corner cases where a
     large amount of small manufacturing orders are being generated.
+
+- | Fix for the approved manufacturing orders. If its operation has an offset, the
+    manufacturing order could be moved in time when running a plan.
 
 .. rubric:: Demand forecasting
 
@@ -28,6 +177,13 @@ You can already check out a `preview <https://demo-preview.frepple.com>`_.
     with no demand history. That was leading to a lower forecast than expected. A new enhancement
     detects this situation and ignores the last buckets with no demand history when generating a
     statistical forecast.
+
+.. rubric:: Inventory planning
+
+- | A corner case has been resolved in the ABC classification.
+  | Items with a cost equal to 0 were not getting a classification. They will now
+    be classified in the last group (C if the ABC parameters were not updated).
+  | This applies to Enterprise and Cloud Editions only.
 
 .. rubric:: Odoo integration
 
@@ -40,6 +196,16 @@ You can already check out a `preview <https://demo-preview.frepple.com>`_.
 
 - | The API for uploading data files to the "import data files" task has extra URLs for
     retrieving the list of all data files, with their timestamp and file size.
+
+- | Fixed a minor inconsistency between full and incremental export of work orders.
+  | The full export only sent approved and proposed workorders, whereas the incremental
+    export didn't include such a filter. The filter is now removed.
+
+.. rubric:: System administration
+
+- | The docker container logs now display the apache output.
+  | The container logs now provide a better insight in the container status. Muuuuch
+    easier than navigating to the volume with the apache log files.
 
 9.4.0 (2024-11-08)
 ==================

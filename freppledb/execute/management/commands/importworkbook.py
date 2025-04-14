@@ -38,6 +38,7 @@ from django.utils.encoding import force_str
 from django.template.loader import render_to_string
 
 from freppledb import __version__
+from freppledb.boot import addAttributesFromDatabase
 from freppledb.common.middleware import _thread_locals
 from freppledb.common.models import User, Comment, Parameter
 from freppledb.common.report import GridReport, matchesModelName
@@ -306,6 +307,17 @@ class Command(BaseCommand):
 
                         print("%s" % _("Done"))
                         # yield '<div><strong>%s</strong></div>' % _("Done")
+
+                # Modify the database tables to reflect all attributes
+                if self.database == DEFAULT_DB_ALIAS:
+                    addAttributesFromDatabase()
+
+                # Modify the forecastplan table to reflect all measures
+                if "freppledb.forecast" in settings.INSTALLED_APPS:
+                    from freppledb.forecast.models import ForecastPlan
+
+                    ForecastPlan.refreshTableColumns(self.database)
+
             except GeneratorExit:
                 logger.warning("Connection Aborted")
         except Exception as e:
@@ -330,7 +342,7 @@ class Command(BaseCommand):
 
     # accordion template
     title = _("Import a spreadsheet")
-    index = 1100
+    index = 2000
     help_url = "command-reference.html#importworkbook"
 
     @staticmethod

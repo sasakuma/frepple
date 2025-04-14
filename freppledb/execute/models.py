@@ -24,8 +24,10 @@
 from datetime import datetime, timedelta
 import os
 import shlex
+import zoneinfo
 
-from django.db import models
+from django.conf import settings
+from django.db import connections, DEFAULT_DB_ALIAS, models
 from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 
@@ -107,6 +109,13 @@ class ScheduledTask(models.Model):
         "email_success", max_length=300, null=True, blank=True
     )
     data = models.JSONField(null=True, blank=True)
+    tz = models.CharField(
+        _("time zone"),
+        choices=[(i, i) for i in zoneinfo.available_timezones()],
+        max_length=40,
+        null=True,
+        blank=True,
+    )
 
     def __str__(self):
         return self.name
@@ -145,7 +154,9 @@ class ScheduledTask(models.Model):
             if starttime is not None and starttime >= 0:
                 starttime = int(starttime)
                 if not now:
-                    now = datetime.now() + timedelta(seconds=1)
+                    now = datetime.now(
+                        zoneinfo.ZoneInfo(self.tz or settings.TIME_ZONE)
+                    ) + timedelta(seconds=1)
                 time_of_day = now.hour * 3600 + now.minute * 60 + now.second
                 weekday = now.weekday()
                 # Loop over current + next 7 days
@@ -154,11 +165,19 @@ class ScheduledTask(models.Model):
                         # Too late to start today
                         weekday = (weekday + 1) % 7
                     elif self.data.get(weekdays[weekday], False):
-                        self.next_run = (now + timedelta(days=n)).replace(
+                        d = now + timedelta(days=n)
+                        self.next_run = datetime(
+                            year=d.year,
+                            month=d.month,
+                            day=d.day,
                             hour=int(starttime / 3600),
                             minute=int(int(starttime % 3600) / 60),
                             second=starttime % 60,
                             microsecond=0,
+                            tzinfo=zoneinfo.ZoneInfo(self.tz or settings.TIME_ZONE),
+                        )
+                        self.next_run = self.next_run.astimezone(
+                            zoneinfo.ZoneInfo(settings.TIME_ZONE)
                         )
                         return
                     else:
@@ -179,35 +198,43 @@ class ScheduledTask(models.Model):
                 self.lastrun.started += timedelta(seconds=offset)
             if self.lastrun.finished:
                 self.lastrun.finished += timedelta(seconds=offset)
-        if self.data and self.data.get("starttime", None) is not None:
-            self.data["starttime"] += offset
-            if self.data["starttime"] < 0:
-                # Starts the previous day!
-                self.data["starttime"] += 24 * 3600
-                tmp = self.data.get("monday", False)
-                self.data["monday"] = self.data.get("tuesday", False)
-                self.data["tuesday"] = self.data.get("wednesday", False)
-                self.data["wednesday"] = self.data.get("thursday", False)
-                self.data["thursday"] = self.data.get("friday", False)
-                self.data["friday"] = self.data.get("saturday", False)
-                self.data["saturday"] = self.data.get("sunday", False)
-                self.data["sunday"] = tmp
-            elif self.data["starttime"] > 24 * 3600:
-                # Starts the next day!
-                self.data["starttime"] -= 24 * 3600
-                tmp = self.data.get("sunday", False)
-                self.data["sunday"] = self.data.get("saturday", False)
-                self.data["saturday"] = self.data.get("friday", False)
-                self.data["friday"] = self.data.get("thursday", False)
-                self.data["thursday"] = self.data.get("wednesday", False)
-                self.data["wednesday"] = self.data.get("tuesday", False)
-                self.data["tuesday"] = self.data.get("monday", False)
-                self.data["monday"] = tmp
         return self
+
+    @staticmethod
+    def updateScenario(database):
+        with connections[database].cursor() as cursor:
+            cursor.execute(
+                """
+                select count(*) 
+                from execute_schedule
+                where next_run is not null
+                """
+            )
+            scheduled = cursor.fetchone()[0]
+            with connections[DEFAULT_DB_ALIAS].cursor() as cursor_dflt:
+                cursor_dflt.execute(
+                    """
+                    update common_scenario
+                    set info = %s 
+                    where name = %%s
+                    """
+                    % (
+                        "coalesce(info, '{}') || '{\"has_schedule\": true}'"
+                        if scheduled > 0
+                        else "info - 'has_schedule'"
+                    ),
+                    (database,),
+                )
 
     def save(self, *args, **kwargs):
         self.computeNextRun()
         super().save(*args, **kwargs)
+        ScheduledTask.updateScenario(self._state.db)
+
+    def delete(self, *args, **kwargs):
+        db = self._state.db
+        super().delete(*args, **kwargs)
+        ScheduledTask.updateScenario(db)
 
 
 class DataExport(models.Model):

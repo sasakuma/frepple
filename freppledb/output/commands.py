@@ -580,7 +580,7 @@ class ExportOperationPlans(PlanTask):
     ):
         import frepple
 
-        linetemplate = "%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s"
+        linetemplate = "%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s\v%s"
         if with_fcst:
             linetemplate += "\v%s"
         for unused in cls.attrs:
@@ -682,6 +682,7 @@ class ExportOperationPlans(PlanTask):
                 "\\N",  # color is empty for stock
                 clean_value(j.reference),
                 clean_value(j.batch),
+                clean_value(j.remark),
                 "\\N",
             ]
         elif isinstance(i, frepple.operation_itemdistribution):
@@ -730,6 +731,7 @@ class ExportOperationPlans(PlanTask):
                 color,  # color
                 clean_value(j.reference),
                 clean_value(j.batch),
+                clean_value(j.remark),
                 "\\N",
             ]
         elif isinstance(i, frepple.operation_itemsupplier):
@@ -766,6 +768,7 @@ class ExportOperationPlans(PlanTask):
                 color,  # color
                 clean_value(j.reference),
                 clean_value(j.batch),
+                clean_value(j.remark),
                 "\\N",
             ]
         elif not i.hidden:
@@ -818,6 +821,7 @@ class ExportOperationPlans(PlanTask):
                 color,  # color
                 clean_value(j.reference),
                 clean_value(j.batch),
+                clean_value(j.remark),
                 round(j.quantity_completed, 8) if j.quantity_completed else "\\N",
             ]
         elif j.demand or (j.owner and j.owner.demand):
@@ -862,6 +866,7 @@ class ExportOperationPlans(PlanTask):
                 "\\N",  # color is empty for deliver operation
                 clean_value(j.reference),
                 clean_value(j.batch),
+                clean_value(j.remark),
                 "\\N",
             ]
         if data:
@@ -872,7 +877,7 @@ class ExportOperationPlans(PlanTask):
                 if v is None:
                     data.append("\\N")
                 elif attr[2] == "boolean":
-                    data.append(True if v else False)
+                    data.append("t" if v != "False" else "f")
                 elif attr[2] == "duration":
                     data.append(v)
                 elif attr[2] == "integer":
@@ -925,6 +930,7 @@ class ExportOperationPlans(PlanTask):
                 color numeric(20,8),
                 reference character varying(300) NOT NULL,
                 batch character varying(300),
+                remark character varying(300),
                 quantity_completed numeric(20,8)
             """
         if with_fcst:
@@ -987,11 +993,11 @@ class ExportOperationPlans(PlanTask):
         sql = """
             insert into operationplan (reference, name, type, status, quantity, startdate, enddate,
             criticality, delay, plan, source, lastmodified, operation_id, owner_id, item_id,
-            destination_id, origin_id, location_id, supplier_id, demand_id, due%s, color, batch, quantity_completed %s)
+            destination_id, origin_id, location_id, supplier_id, demand_id, due%s, color, batch, remark, quantity_completed %s)
 
             select reference, name, type, status, quantity, startdate, enddate,
             criticality, delay * interval '1 second', plan, source, lastmodified, operation_id, owner_id, item_id,
-            destination_id, origin_id, location_id, supplier_id, demand_id, due%s, color, batch, quantity_completed %s
+            destination_id, origin_id, location_id, supplier_id, demand_id, due%s, color, batch, remark, quantity_completed %s
             from tmp_operationplan
 
             on conflict (reference) do update
@@ -1003,7 +1009,7 @@ class ExportOperationPlans(PlanTask):
                 lastmodified=excluded.lastmodified, operation_id=excluded.operation_id, owner_id=excluded.owner_id,
                 item_id=excluded.item_id, destination_id=excluded.destination_id, origin_id=excluded.origin_id,
                 location_id=excluded.location_id, supplier_id=excluded.supplier_id, demand_id=excluded.demand_id,
-                due=excluded.due%s, color=excluded.color, batch=excluded.batch, quantity_completed=excluded.quantity_completed%s
+                due=excluded.due%s, color=excluded.color, batch=excluded.batch, remark=excluded.remark, quantity_completed=excluded.quantity_completed%s
             """ % (
             forecastfield1,
             "".join(",%s " % a[0] for a in cls.attrs),
@@ -1066,6 +1072,7 @@ class ExportOperationPlans(PlanTask):
                     "color",
                     "reference",
                     "batch",
+                    "remark",
                     "quantity_completed",
                 ]
                 + (
@@ -1305,29 +1312,12 @@ class ComputePeriodOfCover(PlanTask):
             -- all quantities are then aggregated
             update item
             set periodofcover = floor(extract(epoch from coalesce(
-                  -- backlogged demand exceeds the inventory: 0 days of inventory
-                  (
-                  select '0 days'::interval
-                  from operationplanmaterial
-                  %s
-                  inner join operationplan on operationplanmaterial.operationplan_id = operationplan.reference
-                  where operationplanmaterial.item_id = item.name and
-                    (
-                      (operationplanmaterial.quantity < 0 and operationplan.type = 'DLVR' and operationplan.due < %%s)
-                      or ( operationplanmaterial.quantity > 0 and operationplan.status = 'closed' and operationplan.type = 'STCK')
-                      or ( operationplanmaterial.quantity > 0 and operationplan.status in ('approved','confirmed','completed') and flowdate <= %%s + interval '1 second')
-                    )
-                  having sum(operationplanmaterial.quantity) <0
-                  limit 1
-                  ),
                   -- Normal case
                   (
                   select case
                     when periodofcover = 999 * 24 * 3600
                       then '999 days'::interval
-                    when onhand > 0.00001
-                      then date_trunc('day', least( periodofcover * '1 sec'::interval + flowdate - %%s, '999 days'::interval))
-                    else null
+                    else date_trunc('day', least( periodofcover * '1 sec'::interval + flowdate - %%s, '999 days'::interval))
                     end
                   from operationplanmaterial
                   %s
@@ -1366,17 +1356,12 @@ class ComputePeriodOfCover(PlanTask):
                     else ""
                 ),
                 (
-                    "inner join cluster_item_tmp on cluster_item_tmp.name = operationplanmaterial.item_id"
-                    if cluster != -1
-                    else ""
-                ),
-                (
                     "where name in (select name from cluster_item_tmp)"
                     if cluster != -1
                     else ""
                 ),
             ),
-            ((currentdate,) * 5),
+            ((currentdate,) * 3),
         )
 
         if cluster != -1:

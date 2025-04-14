@@ -423,6 +423,15 @@ class OperationMaterialList(GridReport):
             extra='"role":"input/item"',
             model=Item,
         ),
+        GridFieldText(
+            "location",
+            title=_("location"),
+            field_name="location__name",
+            formatter="detail",
+            extra='"role":"input/location"',
+            model=Location,
+            initially_hidden=True,
+        ),
         GridFieldChoice("type", title=_("type"), choices=OperationMaterial.types),
         GridFieldNumber("quantity", title=_("quantity")),
         GridFieldNumber(
@@ -1846,7 +1855,6 @@ class ManufacturingOrderList(OperationPlanMixin):
     @classmethod
     def basequeryset(reportclass, request, *args, **kwargs):
         q = ManufacturingOrder.objects.all()
-        use_default_filter = True
         if "calendarstart" in request.GET:
             q = q.filter(
                 Q(enddate__gte=request.GET["calendarstart"])
@@ -1855,7 +1863,6 @@ class ManufacturingOrderList(OperationPlanMixin):
                     & Q(startdate__gte=request.GET["calendarstart"])
                 )
             )
-            use_default_filter = False
         if "calendarend" in request.GET:
             q = q.filter(
                 Q(startdate__lte=request.GET["calendarend"])
@@ -1864,16 +1871,6 @@ class ManufacturingOrderList(OperationPlanMixin):
                     & Q(enddate__lte=request.GET["calendarend"])
                 )
             )
-            use_default_filter = False
-        if use_default_filter and "noautofilter" not in request.GET:
-            if request.report_enddate:
-                q = q.filter(
-                    Q(startdate__lte=request.report_enddate)
-                    | (
-                        Q(startdate__isnull=True)
-                        & Q(enddate__lte=request.report_enddate)
-                    )
-                )
 
         if args and args[0]:
             path = request.path.split("/")[4]
@@ -2101,6 +2098,7 @@ class ManufacturingOrderList(OperationPlanMixin):
             initially_hidden=True,
             extra='"formatoptions":{"defaultValue":""}, "summaryType":"sum"',
         ),
+        GridFieldText("remark", title=_("remark"), editable="true"),
         GridFieldCurrency(
             "total_cost",
             title=_("total cost"),

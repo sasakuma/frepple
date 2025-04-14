@@ -430,7 +430,6 @@ class ResourceDetail(OperationPlanMixin):
         else:
             base = OperationPlanResource.objects
         base = reportclass.operationplanExtraBasequery(base, request)
-        use_default_filter = True
         if "calendarstart" in request.GET:
             base = base.filter(
                 Q(operationplan__enddate__gte=request.GET["calendarstart"])
@@ -439,7 +438,6 @@ class ResourceDetail(OperationPlanMixin):
                     & Q(operationplan__startdate__gte=request.GET["calendarstart"])
                 )
             )
-            use_default_filter = False
         if "calendarend" in request.GET:
             base = base.filter(
                 Q(operationplan__startdate__lte=request.GET["calendarend"])
@@ -448,16 +446,7 @@ class ResourceDetail(OperationPlanMixin):
                     & Q(operationplan__enddate__lte=request.GET["calendarend"])
                 )
             )
-            use_default_filter = False
-        if use_default_filter and "noautofilter" not in request.GET:
-            if request.report_enddate:
-                base = base.filter(
-                    Q(operationplan__startdate__lte=request.report_enddate)
-                    | (
-                        Q(operationplan__startdate__isnull=True)
-                        & Q(operationplan__enddate__lte=request.report_enddate)
-                    )
-                )
+
         return base.select_related().annotate(
             opplan_duration=RawSQL(
                 "(operationplan.enddate - operationplan.startdate)", []
@@ -521,12 +510,11 @@ class ResourceDetail(OperationPlanMixin):
             if "/operationplanresource/resource/" in request.path:
                 resource = request.path.strip("/").split("/")[-1]
                 res = Resource.objects.using(request.database).get(name__exact=resource)
-
                 dateformat = (
-                    settings.DATETIME_INPUT_FORMATS[0]
-                    if hasattr(settings, "DATETIME_INPUT_FORMATS")
-                    else "%Y-%m-%d %H:%M:%S"
-                )
+                    settings.DATETIME_INPUT_FORMATS
+                    if settings.DATE_STYLE_WITH_HOURS
+                    else settings.DATE_INPUT_FORMATS
+                )[0]
                 if "buckets" in res.type.lower() and res.lft == res.rght - 1:
                     if "operationplan__startdate__gte" in request.GET:
                         startdate_filter = request.GET["operationplan__startdate__gte"]
@@ -648,6 +636,12 @@ class ResourceDetail(OperationPlanMixin):
             extra='"role":"input/resource"',
         ),
         GridFieldText("operationplan__reference", title=_("reference"), editable=False),
+        GridFieldText(
+            "operationplan__remark",
+            title=_("remark"),
+            editable=False,
+            initially_hidden=True,
+        ),
         GridFieldText(
             "owner",
             title=_("owner"),

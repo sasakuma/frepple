@@ -23,7 +23,6 @@
 
 import base64
 from datetime import datetime, timedelta
-import email
 import itertools
 import json
 import jwt
@@ -472,12 +471,20 @@ class Command(BaseCommand):
                 wolist = [i for i in i.xchildren.using(self.database).all()]
                 if wolist:
                     for wo in wolist:
+                        net_duration = wo.enddate - wo.startdate
+                        if wo.plan:
+                            for w in wo.plan.get("interruptions", []):
+                                net_duration -= datetime.strptime(
+                                    w[1], "%Y-%m-%d %H:%M:%S"
+                                ) - datetime.strptime(w[0], "%Y-%m-%d %H:%M:%S")
                         rec.append(
-                            '<workorder operation=%s start="%s" end="%s">'
+                            '<workorder operation=%s start="%s" end="%s" remark=%s net_duration="%s">'
                             % (
                                 quoteattr(wo.operation.name),
                                 wo.startdate,
                                 wo.enddate,
+                                quoteattr(getattr(wo, "remark", None) or ""),
+                                int(net_duration.total_seconds()),
                             )
                         )
                         for wores in wo.resources.using(self.database).all():
@@ -518,14 +525,13 @@ class Command(BaseCommand):
                 owner__operation__type="routing",
                 operation__source__startswith="odoo",
                 owner__item__source__startswith="odoo",
-                status="approved",
+                status__in=["approved", "confirmed"],
             )
             .order_by("startdate")
             .select_related("operation", "location", "item", "owner")
         ):
             if (
-                i.status not in ("proposed", "approved")
-                or not i.operation
+                not i.operation
                 or not i.operation.source
                 or not i.owner.operation.item
                 or not i.operation.source.startswith("odoo")
@@ -584,7 +590,7 @@ class Command(BaseCommand):
 
     # accordion template
     title = _("Export data to %(erp)s") % {"erp": "odoo"}
-    index = 1450
+    index = 1150
     help_url = "command-reference.html#odoo_export"
 
     @staticmethod

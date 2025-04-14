@@ -699,7 +699,12 @@ class DashboardNode(Node):
         )
         if not mydashboard:
             mydashboard = settings.DEFAULT_DASHBOARD
-        context[self.hiddenvarname] = {i: j for i, j in reg.items()}
+        context[self.hiddenvarname] = dict(
+            sorted(
+                {i: j for i, j in reg.items()}.items(),
+                key=lambda k: capfirst(k[1].title),
+            )
+        )
         context[self.varname] = []
         for i in mydashboard:
             cols = []
@@ -727,6 +732,11 @@ def getDashboard(parser, token):
 
 
 register.tag("getDashboard", getDashboard)
+
+
+@register.simple_tag(takes_context=True)
+def renderDashboardWidget(context, obj):
+    return mark_safe(obj.render(context.request))
 
 
 @register.simple_tag
@@ -813,7 +823,6 @@ def sort_dictionary_by_key(input_dictionary):
 
 
 sort_dictionary_by_key.is_safe = True
-
 
 
 @register.simple_tag(name="render_field_bootstrap")

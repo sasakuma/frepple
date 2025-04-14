@@ -1,21 +1,22 @@
-<div class="card-header">
-<h5 class="card-title" style="text-transform: capitalize">{{ 'upstream operations'|translate }}</h5>
+<div class="card-header d-flex align-items-center" data-bs-toggle="collapse" data-bs-target="#widget_upstream" aria-expanded="false" aria-controls="widget_upstream">
+<h5 class="card-title fs-5 me-auto text-capitalize">{{ 'upstream operations'|translate }}</h5>
+<span class="fa fa-arrows align-middle w-auto widget-handle"></span>
 </div>
-<div class="card-body">
+<div data-ng-class="['card-body', 'collapse', {'show': !$parent.widget[1]['collapsed']}]" id="widget_upstream">
 <table class="table table-sm table-hover table-borderless"><thead><tr>
-<td><b style="text-transform: capitalize">{{ 'level'|translate }}</b></td>
-<td><b style="text-transform: capitalize">{{ 'reference'|translate }}</b></td>
-<td><b style="text-transform: capitalize">{{ 'type'|translate }}</b></td>
-<td><b style="text-transform: capitalize">{{ 'operation'|translate }}</b></td>
-<td><b style="text-transform: capitalize">{{ 'status'|translate }}</b></td>
-<td><b style="text-transform: capitalize">{{ 'item'|translate }}</b></td>
-<td><b style="text-transform: capitalize">{{ 'location'|translate }}</b></td>
-<td><b style="text-transform: capitalize">{{ 'start date'|translate }}</b></td>
-<td><b style="text-transform: capitalize">{{ 'end date'|translate }}</b></td>
-<td><b style="text-transform: capitalize">{{ 'quantity'|translate }}</b></td>
+<td><b class="text-capitalize">{{ 'level'|translate }}</b></td>
+<td><b class="text-capitalize">{{ 'reference'|translate }}</b></td>
+<td><b class="text-capitalize">{{ 'type'|translate }}</b></td>
+<td><b class="text-capitalize">{{ 'operation'|translate }}</b></td>
+<td><b class="text-capitalize">{{ 'status'|translate }}</b></td>
+<td><b class="text-capitalize">{{ 'item'|translate }}</b></td>
+<td><b class="text-capitalize">{{ 'location'|translate }}</b></td>
+<td><b class="text-capitalize">{{ 'start date'|translate }}</b></td>
+<td><b class="text-capitalize">{{ 'end date'|translate }}</b></td>
+<td><b class="text-capitalize">{{ 'quantity'|translate }}</b></td>
 </tr></thead>
 <tbody>
-<tr data-ng-if="!operationplan.upstreamoperationplans"><td colspan="8">{{ 'no upstream operationplans information'|translate }}</td></tr>
+<tr data-ng-if="!operationplan.upstreamoperationplans"><td colspan="8">{{ 'no upstream information'|translate }}</td></tr>
 <tr data-ng-if="operationplan.upstreamoperationplans && peg[11] != 2" data-ng-repeat="peg in operationplan.upstreamoperationplans track by $index">
 <td>
 <span data-ng-if="peg[11] == 0" class="fa fa-fw fa-caret-right" data-ng-click='expandOrCollapse($index)'></span>

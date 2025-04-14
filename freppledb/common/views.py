@@ -96,7 +96,7 @@ from .report import (
     GridFieldChoice,
     GridFieldJSON,
 )
-from .utils import getStorageUsage
+from .utils import getStorageUsage, forceWsgiReload
 
 from freppledb.admin import data_site
 from freppledb import edition, __version__, runCommand
@@ -111,6 +111,17 @@ logger = logging.getLogger(__name__)
 def AboutView(request):
     maxstorage = getattr(settings, "MAXSTORAGE", 0) or 0
     usedstorage = getStorageUsage()
+    apps = []
+    for i in settings.INSTALLED_APPS:
+        if i in settings.INSTALLABLE_APPS:
+            apps.append(i)
+        else:
+            try:
+                m = getattr(import_module(i), "frepple_app", None)
+                if m and m.get("display_in_list", False):
+                    apps.append(i)
+            except Exception as e:
+                pass
     return JsonResponse(
         {
             "version": __version__,
@@ -120,9 +131,7 @@ def AboutView(request):
                 sizeof_fmt(maxstorage * 1024 * 1024) if maxstorage else None
             ),
             "storage_exceeded": maxstorage and usedstorage > maxstorage,
-            "apps": [
-                i for i in settings.INSTALLED_APPS if i in settings.INSTALLABLE_APPS
-            ],
+            "apps": apps,
             "website": settings.DOCUMENTATION_URL,
         }
     )
@@ -294,7 +303,7 @@ class AppsView(View):
                     print(l, file=f)
 
         # Trigger reloading of the WSGI app
-        Attribute.forceReload()
+        forceWsgiReload()
 
 
 @login_required
@@ -349,14 +358,7 @@ def handler500(request):
         response = render(
             request,
             "500.html",
-            content_type="text/html",
-            context={
-                "logfile": (
-                    "/var/log/apache2/error.log"
-                    if "apache.version" in request.META
-                    else settings.FREPPLE_LOGDIR
-                )
-            },
+            content_type="text/html"
         )
         response.status_code = 500
         return response
@@ -581,7 +583,17 @@ def horizon(request):
         request.user.horizonbefore = form.cleaned_data["horizonbefore"]
         request.user.horizonlength = form.cleaned_data["horizonlength"]
         request.user.horizonunit = form.cleaned_data["horizonunit"]
-        request.user.save()
+        request.user.save(
+            update_fields=[
+                "horizonbuckets",
+                "horizonstart",
+                "horizonend",
+                "horizontype",
+                "horizonbefore",
+                "horizonlength",
+                "horizonunit",
+            ]
+        )
         return HttpResponse(content="OK")
     except Exception as e:
         logger.error("Error saving horizon settings: %s" % e)
@@ -642,6 +654,11 @@ class UserList(GridReport):
     help_url = "user-interface/getting-around/user-permissions-and-roles.html"
     canDuplicate = False
 
+    @classmethod
+    def initialize(reportclass, request):
+        if request.database != DEFAULT_DB_ALIAS:
+            User.synchronize(database=request.database)
+
     rows = (
         GridFieldInteger(
             "id",
@@ -672,6 +689,7 @@ class UserList(GridReport):
             extra='"formatter": grouplistformatter',
             width=120,
             editable=False,
+            sortable=False,
         ),
         GridFieldDateTime("date_joined", title=_("date joined"), editable=False),
         GridFieldDateTime("last_login", title=_("last login"), editable=False),
@@ -730,7 +748,8 @@ class CommentList(GridReport):
     editable = False
     multiselect = False
     frozenColumns = 0
-    help_url = "user-interface/getting-around/comments.html"
+    default_sort = (0, "desc")
+    help_url = "user-interface/getting-around/messages.html"
 
     rows = (
         GridFieldInteger("id", title=_("identifier"), key=True),

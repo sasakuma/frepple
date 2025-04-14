@@ -773,7 +773,7 @@ class HasProblems {
 class Problem::List {
  public:
   /* Constructor. */
-  List(){};
+  List() {};
 
   /* Destructor. */
   ~List() { clear(); }
@@ -973,6 +973,12 @@ class Solver : public Object {
 
   /* Update whether or not we automatically commit the changes. */
   void setAutocommit(const bool b) { autocommit = b; }
+
+  /* Group operationplans together when within the same batch window*/
+  void createsBatches(Operation*, void* = nullptr);
+
+  /* Python method for grouping operationplans. */
+  static PyObject* createsBatches(PyObject*, PyObject*);
 
   virtual const MetaClass& getType() const { return *metadata; }
   static const MetaCategory* metadata;
@@ -1911,6 +1917,14 @@ class OperationPlan : public Object,
 
   void setBatch(const PooledString&, bool up = true);
 
+  PooledString getRemark() const { return remark; }
+
+  const string& getRemarkString() const { return remark; }
+
+  void setRemark(const string& s) { remark = s; }
+
+  void setRemark(const PooledString& s) { remark = s; }
+
   /* Shortcut method to the cluster. */
   int getCluster() const;
 
@@ -2556,6 +2570,8 @@ class OperationPlan : public Object,
         Tags::problems, Tags::problem, &Cls::getProblems, PLAN + WRITE_OBJECT);
     m->addStringRefField<Cls>(Tags::batch, &Cls::getBatchString, &Cls::setBatch,
                               "");
+    m->addStringRefField<Cls>(Tags::remark, &Cls::getRemarkString,
+                              &Cls::setRemark, "");
     // Default of -999 to enforce serializing the value if it is 0
     m->addIntField<Cls>(Tags::criticality, &Cls::getCriticality, nullptr, -999,
                         PLAN);
@@ -2801,6 +2817,9 @@ class OperationPlan : public Object,
 
   /* Serial number, batch or sales order for MTO production. */
   PooledString batch;
+
+  /* Free text description. */
+  PooledString remark;
 
   dependencylist dependencies;
 
@@ -5716,8 +5735,10 @@ class Flow : public Object,
     if (b) return b;
 
     // Dynamically set the buffer
-    if (item && getOperation() && getOperation()->getLocation()) {
-      b = Buffer::findOrCreate(item, getOperation()->getLocation());
+    if (item &&
+        (getLocation() || (getOperation() && getOperation()->getLocation()))) {
+      b = Buffer::findOrCreate(
+          item, getLocation() ? getLocation() : getOperation()->getLocation());
       if (b) const_cast<Flow*>(this)->setPtrB(b, b->getFlows());
     }
     if (!b) throw DataException("Flow doesn't have a buffer");
@@ -5739,6 +5760,10 @@ class Flow : public Object,
       throw DataException("Invalid update of operationmaterial");
     item = i;
   }
+
+  Location* getLocation() const { return loc; }
+
+  void setLocation(Location* l) { loc = l; }
 
   /* Return the leading flow of this group.
    * When the flow has no alternate or if the flow is itself leading
@@ -5797,6 +5822,8 @@ class Flow : public Object,
                                        &Cls::setOperation, MANDATORY + PARENT);
     m->addPointerField<Cls, Item>(Tags::item, &Cls::getItem, &Cls::setItem,
                                   MANDATORY + PARENT);
+    m->addPointerField<Cls, Location>(Tags::location, &Cls::getLocation,
+                                      &Cls::setLocation, PARENT);
     m->addPointerField<Cls, Buffer>(Tags::buffer, &Cls::getBuffer,
                                     &Cls::setBuffer, DONT_SERIALIZE + PARENT);
     m->addDoubleField<Cls>(Tags::quantity, &Cls::getQuantity,
@@ -5834,6 +5861,8 @@ class Flow : public Object,
    * when and if needed.
    */
   Item* item = nullptr;
+
+  Location* loc = nullptr;
 
   /* Variable quantity of the material consumption/production. */
   double quantity = 0.0;
@@ -9921,17 +9950,17 @@ class PeggingIterator : public NonCopyable, public Object {
     short level;
     Duration gap;
 
-    state(){};
+    state() {};
 
     state(const OperationPlan* op, double q, double o, short l, Duration g)
-        : opplan(op), quantity(q), offset(o), level(l), gap(g){};
+        : opplan(op), quantity(q), offset(o), level(l), gap(g) {};
 
     state(const state& other)
         : opplan(other.opplan),
           quantity(other.quantity),
           offset(other.offset),
           level(other.level),
-          gap(other.gap){};
+          gap(other.gap) {};
 
     // Comparison operator
     bool operator<(const state& other) const {

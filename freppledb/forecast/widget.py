@@ -92,18 +92,26 @@ class ForecastWidget(Widget):
       });
     }
 
+    const dropDownButton = document.querySelector('#fcst_selectButton');
+    const options = document.querySelectorAll('#fcstul li a');
 
-    // List of groups
-    var allGroup = ["value", "unit"]
+    for (const option of options) {
+      option.addEventListener('click', event => {
+        dropDownButton.textContent = event.target.textContent;
 
-    // add the options to the button
-    d3.select("#fcst_selectButton")
-      .selectAll('myOptions')
-     	.data(allGroup)
-      .enter()
-    	.append('option')
-      .text(function (d) { return d; }) // text showed in the menu
-      .attr("value", function (d) { return d; }) // corresponding value returned by the button
+        // recover the option that has been chosen
+        var selectedOption = event.target.textContent;
+        // run the updateChart function with this selected option
+
+        d3.selectAll('#fcst_bar').remove();
+        d3.selectAll('#fcst_xaxis').remove();
+        d3.selectAll('#fcst_yaxis').remove();
+        d3.selectAll('#fcst_line').remove();
+        getData(selectedOption);
+
+        draw();
+      });
+    }
 
     getData("value");
 
@@ -194,20 +202,20 @@ class ForecastWidget(Widget):
           graph.showTooltip(
             d[0]
             + "<br>"
-            + (d3.select("#fcst_selectButton").property("value") == "value" ? currency[0]:"")
+            + (d3.select("#fcst_selectButton").textContent == "value" ? currency[0]:"")
             + d[1].toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")
             + " "
-            + (d3.select("#fcst_selectButton").property("value") == "value" ? currency[1]:"units")
+            + (d3.select("#fcst_selectButton").textContent == "value" ? currency[1]:"units")
             + " forecast<br>"
-            + (d3.select("#fcst_selectButton").property("value") == "value" ? currency[0]:"")
+            + (d3.select("#fcst_selectButton").textContent == "value" ? currency[0]:"")
             + (d[2]-d[3]).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")
             + " "
-            + (d3.select("#fcst_selectButton").property("value") == "value" ? currency[1]:"units")
+            + (d3.select("#fcst_selectButton").textContent == "value" ? currency[1]:"units")
             + " closed sales orders<br>"
-            + (d3.select("#fcst_selectButton").property("value") == "value" ? currency[0]:"")
+            + (d3.select("#fcst_selectButton").textContent == "value" ? currency[0]:"")
             + d[3].toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")
             + " "
-            + (d3.select("#fcst_selectButton").property("value") == "value" ? currency[1]:"units")
+            + (d3.select("#fcst_selectButton").textContent == "value" ? currency[1]:"units")
             + " open sales orders");
           $("#tooltip").css('background-color','black').css('color','white');
           })
@@ -227,26 +235,10 @@ class ForecastWidget(Widget):
         .attr("d", line(data));
     }
     draw();
-
-
-    // When the button is changed, update data and redraw()
-    d3.select("#fcst_selectButton").on("change", function(d) {
-        // recover the option that has been chosen
-        var selectedOption = d3.select(this).property("value")
-        // run the updateChart function with this selected option
-
-        d3.selectAll('#fcst_bar').remove();
-        d3.selectAll('#fcst_xaxis').remove();
-        d3.selectAll('#fcst_yaxis').remove();
-        d3.selectAll('#fcst_line').remove();
-        getData(selectedOption);
-
-        draw();
-    })
     """
 
     @classmethod
-    def render(cls, request=None):
+    def render(cls, request):
         cursor = connections[request.database].cursor()
         curdate = getCurrentDate(request.database, lastplan=True)
         history = int(request.GET.get("history", cls.history))
@@ -258,7 +250,15 @@ class ForecastWidget(Widget):
         )
 
         result = [
-            '<select class="form-select form-select-sm d-inline-block w-auto" id="fcst_selectButton"></select>',
+            '<div class="dropdown">',
+            '<button id="fcst_selectButton" class="form-select form-select-sm d-inline-block w-auto text-capitalize" type="button" data-bs-toggle="dropdown" aria-expanded="false">',
+            "<span>value</span>",
+            "</button>",
+            '<ul id="fcstul" class="dropdown-menu w-auto" style="min-width: unset" aria-labelledby="fcst_selectButton">',
+            '<li><a class="dropdown-item text-capitalize">value</a></li>',
+            '<li><a class="dropdown-item text-capitalize">unit</a></li>',
+            "</ul>",
+            "</div>",
             '<svg class="chart" id="forecast" style="width:100%; height: 100%"></svg>',
             '<table style="display:none">',
         ]
@@ -266,18 +266,18 @@ class ForecastWidget(Widget):
             """
             select
               common_bucketdetail.name,
-              round(sum(greatest((value->>'forecasttotalvalue')::numeric,0))) as fcstvalue,
+              round(sum(greatest(forecastplan.forecasttotalvalue,0))) as fcstvalue,
               round(sum(greatest(0,
-                (value->>'orderstotalvalue')::numeric +
-                coalesce((value->>'ordersadjustmentvalue')::numeric,0)
+                coalesce(forecastplan.orderstotalvalue,0) +
+                coalesce(forecastplan.ordersadjustmentvalue,0)
                 ))) as orderstotalvalue,
-              round(sum(greatest((value->>'ordersopenvalue')::numeric,0))) as ordersopenvalue,
-              round(sum(greatest((value->>'forecasttotal')::numeric,0))) as fcst,
+              round(sum(greatest(forecastplan.ordersopenvalue,0))) as ordersopenvalue,
+              round(sum(greatest(forecastplan.forecasttotal,0))) as fcst,
               round(sum(greatest(0,
-                (value->>'orderstotal')::numeric +
-                coalesce((value->>'ordersadjustment')::numeric,0)
+                forecastplan.orderstotal +
+                coalesce(forecastplan.ordersadjustment,0)
                 ))) as orderstotal,
-              round(sum(greatest((value->>'ordersopen')::numeric,0))) as ordersopen
+              round(sum(greatest(forecastplan.ordersopen,0))) as ordersopen
             from common_bucketdetail
             left outer join forecastplan
               on item_id = (select name from item where item.lvl = 0 limit 1)
@@ -422,7 +422,7 @@ class ForecastAccuracyWidget(Widget):
     """
 
     @classmethod
-    def render(cls, request=None):
+    def render(cls, request):
         cursor = connections[request.database].cursor()
         curdate = getCurrentDate(request.database, lastplan=True)
         history = int(request.GET.get("history", cls.history))
@@ -439,8 +439,8 @@ class ForecastAccuracyWidget(Widget):
               (
               select
                 startdate,
-                greatest((value->>'forecasttotal')::numeric,0) fcst,
-                greatest((value->>'orderstotal')::numeric + coalesce((value->>'ordersadjustment')::numeric,0),0) orders
+                greatest(forecastplan.forecasttotal,0) fcst,
+                greatest(forecastplan.orderstotal + coalesce(forecastplan.ordersadjustment,0),0) orders
               from forecastplan
               inner join forecast
                 on forecastplan.item_id = forecast.item_id
@@ -496,7 +496,7 @@ class OutliersWidget(Widget):
         return "?%s" % urlencode({"limit": self.limit})
 
     @classmethod
-    def render(cls, request=None):
+    def render(cls, request):
         limit = int(request.GET.get("limit", cls.limit))
         cursor = connections[request.database].cursor()
         result = [
