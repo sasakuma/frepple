@@ -27,9 +27,34 @@ do
   fi
 done
 
+# check if item table exists on the default schema
+# This is needed to figure out if we load the demo datasets
+RAW_OUTPUT=$(frepplectl dbshell <<EOF
+SELECT EXISTS (
+  SELECT 1 FROM information_schema.tables
+  WHERE table_name = 'item'
+);
+EOF
+)
+# Extract just 't' or 'f'
+TABLE_EXISTS=$(echo "$RAW_OUTPUT" | sed -n '3p' | xargs)
+
 # Create and migrate the databases
 frepplectl createdatabase --skip-if-exists
 frepplectl migrate --noinput
+
+# populate the database with initial data
+if [ "$TABLE_EXISTS" = "t" ]; then
+	echo "Schema already created. Skipping initial data population."
+else
+	echo "Populating initial data"
+  frepplectl scenario_copy default scenario1 --description="distribution demo"
+  frepplectl scenario_copy default scenario2 --description="manufacturing demo"
+  frepplectl loaddata --database=scenario1 distribution_demo --verbosity=0
+  frepplectl runplan --database=scenario1 --env=fcst,supply --background
+  frepplectl loaddata --database=scenario2 manufacturing_demo --verbosity=0
+  frepplectl runplan --database=scenario2 --env=fcst,supply --background
+fi
 
 # Configure Apache
 grep -qxF 'ServerName' /etc/apache2/apache2.conf || echo "ServerName localhost" >> /etc/apache2/apache2.conf

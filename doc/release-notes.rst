@@ -1,21 +1,27 @@
 Release notes
 -------------
 
-9.8.0 (Upcoming release)
+9.9.0 (Upcoming release)
 ========================
 
-This release is scheduled for end of April.
+This release is scheduled for end of June.
 You can already check out a `preview <https://demo-preview.frepple.com>`_.
 
+9.8.0 (2025-05-16)
+==================
+
 .. rubric:: User interface
+
+- | The quick filter capability for the reports has been improved.
+  | You can now easy to change the field and operator of such a filter.
 
 - | Bug Fix: A forecast report file with the forecast column and without the item, location
     and customer columns was loaded against the root forecast combination.
 
 .. rubric:: Production planning
 
-- | Bug fix: Situations where the sales order devlivery exceeds the requested quantity were not handled correctly.
-  | This can happen for instance when we need to round up the delivery to certain multiple.
+- | Bug fix: Situations where the sales order delivery exceeds the requested quantity were not handled correctly.
+  | This can happen for instance when we need to round up the delivery to a multiple.
 
 - | Bug fix: More robust handling of situation where the size minimum of an operation
     is greater than the size maximum.
@@ -38,6 +44,26 @@ You can already check out a `preview <https://demo-preview.frepple.com>`_.
 - | All Odoo versions. When exporting POs, MOs or DOs from the sales order table of frePPLe to Odoo,
   | the supplier, end date and quantity can be updated in the export dialog before sending the records
   | to Odoo.
+
+- | 17, 18: Improved support for kit (aka phantom) bill of materials.
+
+- | 17, 18: New field "post operation time" on odoo BOM operations.
+  | This field maps into the post-operation time field in frePPLe, which defines a time
+    gap frepple tries to leave between the operations.
+
+- | 17, 18: New field "workcenter quantity" on odoo BOM operations.
+  | With this field you specify multiple work centers are used in parallel on the operation.
+
+- | 17, 18: New field "constrained" on odoo work centers.
+  | The fields specifies whether that work center should be planned in finite capacity mode or not.
+
+- | All odoo versions: The material consumption of work orders wasn't correctly
+    processed if they weren't consumed on the first step.
+
+.. rubric:: Installation
+
+- | A new installation will now automatically populate demo datasets in two scenarios.
+  | Hopefully this can inspire new users and shorten the learning curve.
 
 9.7.0 (2025-03-21)
 ==================
